@@ -2,6 +2,8 @@
 
 [English](README.md) | [日本語](README.ja.md)
 
+<img width="678" height="496" alt="image" src="https://github.com/user-attachments/assets/ef38a74d-ed0e-41c5-ba4e-093ca814c2c3" />
+
 CLI / TUI that lists listening TCP/UDP ports on Windows, Linux, and macOS.
 
 Think of it as a port-focused `lsof`: quickly see who is holding a port, then kill the process if you need to.
