@@ -1,0 +1,6 @@
+/lsoff
+/lsoff.exe
+/dist/
+*.test
+*.out
+.DS_Store
