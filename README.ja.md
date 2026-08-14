@@ -8,6 +8,8 @@ Windows / Linux / macOS で LISTEN 中の TCP/UDP ポートを一覧する CLI /
 
 ## インストール
 
+バイナリは [GitHub Releases](https://github.com/yutat23/lsoff/releases) に付いています（`lsoff-darwin-arm64`、`lsoff-linux-amd64`、`lsoff-windows-amd64.exe` など）。
+
 ```bash
 go install github.com/yutat23/lsoff@latest
 ```
@@ -19,6 +21,8 @@ git clone https://github.com/yutat23/lsoff
 cd lsoff
 go build -o lsoff .
 ```
+
+タグを push すると（`git tag v0.1.0 && git push origin v0.1.0`）バイナリをビルドして Release に添付します。
 
 macOS では libproc を使うため CGO が必要です（通常の `go build` で有効です）。
 

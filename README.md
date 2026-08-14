@@ -8,6 +8,8 @@ Think of it as a port-focused `lsof`: quickly see who is holding a port, then ki
 
 ## Install
 
+Binaries are attached to [GitHub Releases](https://github.com/yutat23/lsoff/releases) (`lsoff-darwin-arm64`, `lsoff-linux-amd64`, `lsoff-windows-amd64.exe`, …).
+
 ```bash
 go install github.com/yutat23/lsoff@latest
 ```
@@ -19,6 +21,8 @@ git clone https://github.com/yutat23/lsoff
 cd lsoff
 go build -o lsoff .
 ```
+
+A tagged push (`git tag v0.1.0 && git push origin v0.1.0`) builds those binaries and publishes the release.
 
 macOS uses libproc, so CGO is required (enabled by a normal `go build`).
 
