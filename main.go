@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-var version = "0.1.1"
+var version = "0.1.2"
 
 type config struct {
 	tcp     bool
