@@ -2,7 +2,7 @@
 
 [English](README.md) | [日本語](README.ja.md)
 
-<img width="678" height="496" alt="image" src="https://github.com/user-attachments/assets/ef38a74d-ed0e-41c5-ba4e-093ca814c2c3" />
+<img width="842" height="469" alt="image" src="https://github.com/user-attachments/assets/1b13713d-8510-4e23-816f-730a31fdaee6" />
 
 CLI / TUI that lists listening TCP/UDP ports on Windows, Linux, and macOS.
 
