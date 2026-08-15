@@ -611,7 +611,7 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(helpStyle.Render("/ search  j/k move  enter fold  y copy  a auto  s sort  x kill  q quit"))
+	b.WriteString(helpStyle.Render("/ search  j/k move  enter expand  y copy  a auto  s sort  x kill  q quit"))
 	return b.String()
 }
 
