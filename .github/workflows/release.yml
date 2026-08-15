@@ -16,8 +16,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
       - name: Test
@@ -57,8 +57,8 @@ jobs:
             cgo: "1"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
       - name: Build
@@ -70,7 +70,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           name="lsoff-${GOOS}-${GOARCH}${{ matrix.ext }}"
           go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "${name}" .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: lsoff-${{ matrix.goos }}-${{ matrix.goarch }}
           path: lsoff-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
@@ -80,8 +80,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -101,11 +101,11 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: yutat23/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
