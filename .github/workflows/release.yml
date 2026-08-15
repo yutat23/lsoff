@@ -95,3 +95,75 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
+
+  # Requires repo secret HOMEBREW_TAP_TOKEN: a PAT with contents:write on yutat23/homebrew-tap.
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/checkout@v4
+        with:
+          repository: yutat23/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+      - name: Update formula
+        working-directory: homebrew-tap
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sha() { sha256sum "../dist/$1" | awk '{print $1}'; }
+          darwin_arm64=$(sha lsoff-darwin-arm64)
+          darwin_amd64=$(sha lsoff-darwin-amd64)
+          linux_arm64=$(sha lsoff-linux-arm64)
+          linux_amd64=$(sha lsoff-linux-amd64)
+          cat > Formula/lsoff.rb <<EOF
+          class Lsoff < Formula
+            desc "CLI/TUI for listing listening TCP/UDP ports"
+            homepage "https://github.com/yutat23/lsoff"
+            version "${version}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/yutat23/lsoff/releases/download/v${version}/lsoff-darwin-arm64"
+                sha256 "${darwin_arm64}"
+              end
+              on_intel do
+                url "https://github.com/yutat23/lsoff/releases/download/v${version}/lsoff-darwin-amd64"
+                sha256 "${darwin_amd64}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/yutat23/lsoff/releases/download/v${version}/lsoff-linux-arm64"
+                sha256 "${linux_arm64}"
+              end
+              on_intel do
+                url "https://github.com/yutat23/lsoff/releases/download/v${version}/lsoff-linux-amd64"
+                sha256 "${linux_amd64}"
+              end
+            end
+
+            def install
+              os = OS.mac? ? "darwin" : "linux"
+              arch = Hardware::CPU.arm? ? "arm64" : "amd64"
+              binary = "lsoff-#{os}-#{arch}"
+              chmod "+x", binary
+              bin.install binary => "lsoff"
+            end
+
+            test do
+              assert_match "lsoff #{version}", shell_output("#{bin}/lsoff --version")
+            end
+          end
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/lsoff.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "lsoff ${version}"
+          git push

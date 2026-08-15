@@ -12,6 +12,14 @@ Think of it as a port-focused `lsof`: quickly see who is holding a port, then ki
 
 Binaries are attached to [GitHub Releases](https://github.com/yutat23/lsoff/releases) (`lsoff-darwin-arm64`, `lsoff-linux-amd64`, `lsoff-windows-amd64.exe`, …).
 
+On macOS or Linux, install it from the [Homebrew tap](https://github.com/yutat23/homebrew-tap). Homebrew 6 requires trusting a third-party tap first:
+
+```bash
+brew tap yutat23/tap
+brew trust yutat23/tap
+brew install lsoff
+```
+
 ```bash
 go install github.com/yutat23/lsoff@latest
 ```
