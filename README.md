@@ -56,7 +56,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | Key / action | What it does |
 |------|------|
 | `/` / click `Search:` / `ctrl+f` | Search (port, PID, name, project, path, cmdline; spaces are AND) |
-| `↑` / `↓` / click / wheel | Move and select (works while searching too) |
+| `↑` / `↓` / `j` / `k` / click / wheel | Move and select (works while searching too) |
 | Click a header | Sort by that column (click again for descending) |
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
 | `y` | Copy the selected `addr:port` |
@@ -65,7 +65,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `h` / `l` | Collapse / expand |
 | `esc` / `ctrl+c` | Clear the search |
 | `r` | Reload |
-| `k` | Kill the selected process (asks first) |
+| `x` | Kill the selected process (asks first) |
 | `q` | Quit |
 
 In the TUI, `tcp` is green and `udp` is amber. The selected row uses the highlight background instead. The CLI table stays uncolored so it stays script-friendly. Process names, command lines, and paths are sanitized for the terminal (control characters and ANSI/OSC sequences). JSON keeps the original strings.
@@ -74,7 +74,7 @@ Sockets that share a PID (typical IPv4 + IPv6) start collapsed as one row with `
 
 Known service names (http, postgres, redis, vite, …) are searchable and shown on the `SVC` footer line. Ambiguous ports such as 3000 are aliases-only and have no single display name. Historic ports (echo, chargen) are not included. JSON may include `"service"` when a display name exists.
 
-After `k`, press `y` to confirm, or `n` / `esc` to cancel. Kill verifies that the process is still the same one that was listed: Linux uses `pidfd_open` (the fd refers to that process, not the PID number), macOS checks `pbi_start_tvsec`/`usec` then signals, and Windows checks `CreationTime` on an open process handle. On Unix it sends SIGTERM first, then SIGKILL if that same process is still alive after 2 seconds. On Windows it uses `TerminateProcess`. pid 1 and the lsoff process itself are never killed.
+After `x`, press `y` to confirm, or `n` / `esc` to cancel. Kill verifies that the process is still the same one that was listed: Linux uses `pidfd_open` (the fd refers to that process, not the PID number), macOS checks `pbi_start_tvsec`/`usec` then signals, and Windows checks `CreationTime` on an open process handle. On Unix it sends SIGTERM first, then SIGKILL if that same process is still alive after 2 seconds. On Windows it uses `TerminateProcess`. pid 1 and the lsoff process itself are never killed.
 
 CLI `-k` follows the same rules. If the same PID appears twice (IPv4 and IPv6), it is killed only once. When stdin is not a TTY, `-y` is required so a pipe cannot kill by accident.
 

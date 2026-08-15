@@ -248,7 +248,7 @@ Flags:
 
 TUI:
   / or click Search      filter as you type
-  ↑/↓ / wheel            move
+  ↑/↓ / j/k / wheel      move
   click header           sort by column
   y                      copy addr:port
   a                      auto-refresh
@@ -257,7 +257,7 @@ TUI:
   h / l                  collapse / expand
   esc / ctrl+c           clear search
   r                      refresh
-  k                      kill selected process (asks for confirmation)
+  x                      kill selected process (asks for confirmation)
   q                      quit
 `
 }

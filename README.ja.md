@@ -54,7 +54,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | 操作 | 動作 |
 |------|------|
 | `/` / `Search:` をクリック / `ctrl+f` | 検索（ポート・PID・名前・プロジェクト・パス・cmdline。空白は AND） |
-| `↑` / `↓` / クリック / ホイール | 移動・選択（検索中も可） |
+| `↑` / `↓` / `j` / `k` / クリック / ホイール | 移動・選択（検索中も可） |
 | ヘッダークリック | その列でソート（もう一度で降順） |
 | `s` / `S` | ソート列を切り替え / 昇降順 |
 | `y` | 選択中の `addr:port` をコピー |
@@ -63,7 +63,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `h` / `l` | 折りたたみ / 展開 |
 | `esc` / `ctrl+c` | 検索をクリア |
 | `r` | 再読み込み |
-| `k` | 選択中プロセスを終了（確認あり） |
+| `x` | 選択中プロセスを終了（確認あり） |
 | `q` | 終了 |
 
 TUI では `tcp` を緑、`udp` をアンバーで色分けします。選択中の行は背景色が優先されます。CLI の表はスクリプト向けのため着色しません。プロセス名、cmdline、パスは端末向けに制御文字と ANSI/OSC を除去します。JSON は元の文字列を保持します。
@@ -72,7 +72,7 @@ TUI では `tcp` を緑、`udp` をアンバーで色分けします。選択中
 
 よく使うサービス名（http, postgres, redis, vite, …）は検索でき、フッターの `SVC` に出ます。3000 番のように名前が一つに決まらないポートは検索エイリアスのみです。echo / chargen などの歴史的ポートは入れていません。JSON は表示名があるとき `"service"` を付けます。
 
-`k` のあとに `y` で実行、`n` または `esc` でキャンセルします。kill は一覧時のプロセスと同一かを検証します。Linux は `pidfd_open`（fd が PID 番号ではなくそのプロセスを指す）、macOS は `pbi_start_tvsec` / `usec` を確認してから signal、Windows は開いたハンドルの `CreationTime` です。Unix ではまず SIGTERM、2 秒残っていたら同じプロセスへ SIGKILL です。Windows は `TerminateProcess` です。pid 1 と自身は殺しません。
+`x` のあとに `y` で実行、`n` または `esc` でキャンセルします。kill は一覧時のプロセスと同一かを検証します。Linux は `pidfd_open`（fd が PID 番号ではなくそのプロセスを指す）、macOS は `pbi_start_tvsec` / `usec` を確認してから signal、Windows は開いたハンドルの `CreationTime` です。Unix ではまず SIGTERM、2 秒残っていたら同じプロセスへ SIGKILL です。Windows は `TerminateProcess` です。pid 1 と自身は殺しません。
 
 CLI の `-k` も同じです。同じ PID が IPv4/IPv6 で二重に出ていても一度だけ終了します。パイプから呼ぶときは誤爆防止のため `-y` が必要です。
 

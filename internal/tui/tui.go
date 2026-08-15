@@ -372,7 +372,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.status = "copied " + ep
 		return m, nil
-	case "k":
+	case "x":
 		e, ok := m.selected()
 		if !ok {
 			m.status = "nothing selected"
@@ -397,7 +397,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "h":
 		m.setFold(false)
 		return m, nil
-	case "up", "ctrl+p":
+	case "up", "k", "ctrl+p":
 		if m.cursor > 0 {
 			m.cursor--
 			m.clamp()
@@ -611,7 +611,7 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(helpStyle.Render("/ search  enter fold  y copy  a auto  s sort  k kill  q quit"))
+	b.WriteString(helpStyle.Render("/ search  j/k move  enter fold  y copy  a auto  s sort  x kill  q quit"))
 	return b.String()
 }
 

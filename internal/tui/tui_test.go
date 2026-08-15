@@ -257,3 +257,42 @@ func TestFormatRowSanitizes(t *testing.T) {
 		t.Fatalf("missing sanitized name: %q", got)
 	}
 }
+
+func TestJKMovesCursor(t *testing.T) {
+	m := newModel(false, false, "")
+	m.width = 80
+	m.height = 24
+	m.rows = make([]viewRow, 5)
+	m.cursor = 2
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	got := next.(model)
+	if got.cursor != 3 {
+		t.Fatalf("j cursor=%d", got.cursor)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	got = next.(model)
+	if got.cursor != 2 {
+		t.Fatalf("k cursor=%d", got.cursor)
+	}
+	if got.confirm {
+		t.Fatal("k should move, not kill")
+	}
+}
+
+func TestXStartsKillConfirm(t *testing.T) {
+	m := newModel(false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+	m.rows = []viewRow{
+		{e: listen.Entry{Proto: listen.TCP, Port: 80, PID: 12, Start: 1, Name: "nginx"}},
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	got := next.(model)
+	if !got.confirm {
+		t.Fatal("expected confirm after x")
+	}
+}
