@@ -35,6 +35,12 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("203")).
 			Padding(0, 1)
+	shortcutKey    = lipgloss.NewStyle()
+	shortcutDanger = lipgloss.NewStyle().Foreground(lipgloss.Color("168"))
+	shortcutQuit   = lipgloss.NewStyle()
+	shortcutLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	shortcutSep    = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
+	shortcutBar    = lipgloss.NewStyle()
 )
 
 type loadedMsg struct {
@@ -528,7 +534,7 @@ func (m *model) clamp() {
 }
 
 func (m model) pageSize() int {
-	h := m.height - 11
+	h := m.height - 12
 	if h < 1 {
 		return 1
 	}
@@ -611,8 +617,72 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(helpStyle.Render("/ search  j/k move  enter expand  y copy  a auto  s sort  x kill  q quit"))
+	b.WriteString(renderFooterRule(m.width) + "\n")
+	b.WriteString(renderShortcuts(m.width))
 	return b.String()
+}
+
+func renderFooterRule(width int) string {
+	n := width
+	if n < 1 {
+		n = 1
+	}
+	return shortcutSep.Render(strings.Repeat("─", n))
+}
+
+type shortcutItem struct {
+	key   string
+	label string
+	style lipgloss.Style
+}
+
+func renderShortcuts(width int) string {
+	enter := "enter"
+	if width > 0 && width < 100 {
+		enter = "↵"
+	}
+
+	all := []shortcutItem{
+		{"/", "search", shortcutKey},
+		{"j/k", "move", shortcutKey},
+		{enter, "expand", shortcutKey},
+		{"y", "copy", shortcutKey},
+		{"a", "auto", shortcutKey},
+		{"s", "sort", shortcutKey},
+		{"x", "kill", shortcutDanger},
+		{"q", "quit", shortcutQuit},
+	}
+	variants := [][]shortcutItem{
+		all,
+		{all[0], all[1], all[2], all[3], all[4], all[6], all[7]},
+		{all[0], all[1], all[2], all[3], all[6], all[7]},
+		{all[0], all[1], all[2], all[6], all[7]},
+		{all[0], all[1], all[6], all[7]},
+		{all[0], all[6], all[7]},
+	}
+
+	line := joinShortcuts(variants[len(variants)-1])
+	for _, items := range variants {
+		candidate := joinShortcuts(items)
+		if width <= 0 || lipgloss.Width(candidate)+2 <= width {
+			line = candidate
+			break
+		}
+	}
+
+	style := shortcutBar
+	if width > 0 {
+		style = style.Width(width).MaxWidth(width)
+	}
+	return style.Render(" " + line)
+}
+
+func joinShortcuts(items []shortcutItem) string {
+	parts := make([]string, len(items))
+	for i, it := range items {
+		parts[i] = it.style.Render(it.key) + shortcutLabel.Render(" "+it.label)
+	}
+	return strings.Join(parts, shortcutSep.Render(" · "))
 }
 
 func protoLabel(tcp, udp bool) string {

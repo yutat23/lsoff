@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yutat23/lsoff/internal/listen"
 )
 
@@ -278,6 +279,64 @@ func TestJKMovesCursor(t *testing.T) {
 	}
 	if got.confirm {
 		t.Fatal("k should move, not kill")
+	}
+}
+
+func TestShortcutBarAtBottom(t *testing.T) {
+	m := newModel(false, false, "")
+	m.width = 80
+	m.height = 24
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("too few lines: %q", view)
+	}
+	if !strings.Contains(lines[0], "lsoff") {
+		t.Fatalf("title should be first: %q", lines[0])
+	}
+	bar := lines[len(lines)-1]
+	for _, want := range []string{"search", "move", "expand", "copy", "auto", "sort", "kill", "quit"} {
+		if !strings.Contains(bar, want) {
+			t.Fatalf("shortcuts missing %q: %q", want, bar)
+		}
+	}
+	if bar == helpStyle.Render("/ search  j/k move  enter expand  y copy  a auto  s sort  x kill  q quit") {
+		t.Fatal("shortcut bar should be styled, not the old dim help line")
+	}
+	if strings.Contains(lines[1], "search") && strings.Contains(lines[1], "quit") {
+		t.Fatalf("shortcuts should stay at the bottom: %q", lines[1])
+	}
+	rule := lines[len(lines)-2]
+	if !strings.Contains(rule, "─") {
+		t.Fatalf("footer should have a rule: %q", rule)
+	}
+}
+
+func TestRenderShortcutsStylesKeys(t *testing.T) {
+	got := renderShortcuts(80)
+	if !strings.Contains(got, shortcutKey.Render("/")) {
+		t.Fatalf("missing styled /: %q", got)
+	}
+	if !strings.Contains(got, shortcutDanger.Render("x")) {
+		t.Fatalf("missing styled kill key: %q", got)
+	}
+	if !strings.Contains(got, shortcutQuit.Render("q")) {
+		t.Fatalf("missing styled quit key: %q", got)
+	}
+	if !strings.Contains(got, shortcutSep.Render(" · ")) {
+		t.Fatalf("missing separator: %q", got)
+	}
+}
+
+func TestRenderShortcutsFitsWidth(t *testing.T) {
+	for _, w := range []int{40, 60, 80, 120} {
+		got := renderShortcuts(w)
+		if n := lipgloss.Width(got); n > w {
+			t.Fatalf("width %d: rendered %d", w, n)
+		}
+		if n := lipgloss.Width(renderFooterRule(w)); n != w {
+			t.Fatalf("rule width %d: rendered %d", w, n)
+		}
 	}
 }
 
