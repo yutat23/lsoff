@@ -6,6 +6,12 @@
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) です。
 
+## [0.1.3] - 2026-08-16
+
+### Changed
+
+- TUI 下部のショートカットを、キー色とセパレータだけ残した控えめな表示にし、フッターの上にラインを引いた。
+
 ## [0.1.2] - 2026-08-16
 
 ### Changed
@@ -29,6 +35,7 @@
 
 - 初回リリース。Windows / Linux / macOS で LISTEN 中の TCP/UDP ポートを一覧し、TUI と任意の kill を提供する。
 
+[0.1.3]: https://github.com/yutat23/lsoff/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yutat23/lsoff/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yutat23/lsoff/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yutat23/lsoff/releases/tag/v0.1.0
