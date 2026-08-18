@@ -44,6 +44,11 @@ jobs:
             ext: .exe
           - os: ubuntu-latest
             goos: windows
+            goarch: arm64
+            cgo: "0"
+            ext: .exe
+          - os: ubuntu-latest
+            goos: windows
             goarch: "386"
             cgo: "0"
             ext: .exe
