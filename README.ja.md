@@ -10,7 +10,15 @@ Windows / Linux / macOS で LISTEN 中の TCP/UDP ポートを一覧する CLI /
 
 バイナリは [GitHub Releases](https://github.com/yutat23/lsoff/releases) に付いています（`lsoff-darwin-arm64`、`lsoff-linux-amd64`、`lsoff-windows-amd64.exe` など）。
 
-macOS / Linux では、[Homebrew tap](https://github.com/yutat23/homebrew-tap) からインストールできます。Homebrew 6 ではサードパーティ tap を先に trust する必要があります。
+### Windows（WinGet）
+
+```powershell
+winget install yutat23.lsoff
+```
+
+### macOS / Linux（Homebrew）
+
+[Homebrew tap](https://github.com/yutat23/homebrew-tap) からインストールできます。Homebrew 6 ではサードパーティ tap を先に trust する必要があります。
 
 ```bash
 brew tap yutat23/tap
@@ -18,11 +26,13 @@ brew trust yutat23/tap
 brew install lsoff
 ```
 
+### Go install
+
 ```bash
 go install github.com/yutat23/lsoff@latest
 ```
 
-または:
+### ソースからビルド
 
 ```bash
 git clone https://github.com/yutat23/lsoff
