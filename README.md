@@ -54,6 +54,7 @@ lsoff 8080            # show processes holding port 8080
 lsoff nginx           # search by name, path, PID, cmdline, project, service…
 lsoff -q "node 8080"  # space-separated words are AND
 lsoff -t              # TCP only (TUI)
+lsoff -p              # living processes only (valid PID)
 lsoff -u 53           # UDP port 53
 lsoff --json nginx    # search results as JSON
 lsoff -k 8080         # kill those processes (with confirmation)
@@ -77,6 +78,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `↑` / `↓` / `j` / `k` / click / wheel | Move and select (works while searching too) |
 | Click a header | Sort by that column (click again for descending) |
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
+| `p` | Toggle living process filter (hide unknown PID) |
 | `y` | Copy the selected `addr:port` |
 | `a` | Auto-refresh every 2 seconds |
 | `enter` / `space` / click `▸` | Expand or collapse sockets for the same PID |
@@ -88,7 +90,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 
 In the TUI, `tcp` is green and `udp` is amber. The selected row uses the highlight background instead. The CLI table stays uncolored so it stays script-friendly. Process names, command lines, and paths are sanitized for the terminal (control characters and ANSI/OSC sequences). JSON keeps the original strings.
 
-Sockets that share a PID (typical IPv4 + IPv6) start collapsed as one row with `▸` and a `+N` count. `enter` expands them.
+Sockets that share a PID (typical IPv4 + IPv6) start collapsed as one row with `▸` and a `+N` count. `enter` expands them into a small tree: the head shows `▾`, and each extra socket is drawn with `└─`. With three or more sockets the children chain as `├─`, `├─`, … , `└─`.
 
 Known service names (http, postgres, redis, vite, …) are searchable and shown on the `SVC` footer line. Ambiguous ports such as 3000 are aliases-only and have no single display name. Historic ports (echo, chargen) are not included. JSON may include `"service"` when a display name exists.
 

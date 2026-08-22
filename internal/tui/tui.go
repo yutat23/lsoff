@@ -72,6 +72,7 @@ type model struct {
 	loadGen   int
 	wantTCP   bool
 	wantUDP   bool
+	onlyPID   bool
 	auto      bool
 	sortKey   listen.SortKey
 	sortDesc  bool
@@ -79,14 +80,14 @@ type model struct {
 }
 
 // Run starts the interactive TUI.
-func Run(tcp, udp bool, query string) error {
-	m := newModel(tcp, udp, query)
+func Run(tcp, udp, onlyPID bool, query string) error {
+	m := newModel(tcp, udp, onlyPID, query)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
 
-func newModel(tcp, udp bool, query string) model {
+func newModel(tcp, udp, onlyPID bool, query string) model {
 	ti := textinput.New()
 	ti.Placeholder = "/ to search"
 	ti.CharLimit = 80
@@ -98,6 +99,7 @@ func newModel(tcp, udp bool, query string) model {
 		loadGen:  1,
 		wantTCP:  tcp,
 		wantUDP:  udp,
+		onlyPID:  onlyPID,
 		expanded: make(map[int]bool),
 	}
 	if query != "" {
@@ -362,6 +364,14 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sortDesc = !m.sortDesc
 		m.applyFilter()
 		m.status = "sort " + m.sortKey.String()
+	case "p", "P":
+		m.onlyPID = !m.onlyPID
+		if m.onlyPID {
+			m.status = "showing living processes only (PID > 0)"
+		} else {
+			m.status = "showing all listeners"
+		}
+		m.applyFilter()
 		return m, nil
 	case "y":
 		e, ok := m.selected()
@@ -490,7 +500,11 @@ func (m *model) applyFilter() {
 			keep = append(keep, "p/"+strconv.Itoa(r.e.PID))
 		}
 	}
-	filtered := listen.FilterQuery(m.all, m.filter.Value())
+	entries := m.all
+	if m.onlyPID {
+		entries = listen.FilterHasPID(entries)
+	}
+	filtered := listen.FilterQuery(entries, m.filter.Value())
 	m.rows = flattenGroups(filtered, m.sortKey, m.sortDesc, m.expanded)
 	for _, id := range keep {
 		for i, r := range m.rows {
@@ -567,7 +581,11 @@ func (m model) View() string {
 	if m.sortDesc {
 		arrow = "↓"
 	}
-	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s  %s%s", len(m.rows), len(m.all), protoLabel(m.wantTCP, m.wantUDP), m.sortKey.String(), arrow))
+	flags := protoLabel(m.wantTCP, m.wantUDP)
+	if m.onlyPID {
+		flags += "  pid"
+	}
+	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s  %s%s", len(m.rows), len(m.all), flags, m.sortKey.String(), arrow))
 	if m.auto {
 		meta += helpStyle.Render("  auto")
 	}
@@ -646,6 +664,7 @@ func renderShortcuts(width int) string {
 		{"/", "search", shortcutKey},
 		{"j/k", "move", shortcutKey},
 		{enter, "expand", shortcutKey},
+		{"p", "pid", shortcutKey},
 		{"y", "copy", shortcutKey},
 		{"a", "auto", shortcutKey},
 		{"s", "sort", shortcutKey},
@@ -654,13 +673,13 @@ func renderShortcuts(width int) string {
 	}
 	variants := [][]shortcutItem{
 		all,
-		{all[0], all[1], all[2], all[3], all[4], all[6], all[7]},
-		{all[0], all[1], all[2], all[3], all[6], all[7]},
-		{all[0], all[1], all[2], all[6], all[7]},
-		{all[0], all[1], all[6], all[7]},
-		{all[0], all[6], all[7]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[7], all[8]},
+		{all[0], all[1], all[2], all[3], all[4], all[7], all[8]},
+		{all[0], all[1], all[2], all[3], all[7], all[8]},
+		{all[0], all[1], all[2], all[7], all[8]},
+		{all[0], all[1], all[7], all[8]},
+		{all[0], all[7], all[8]},
 	}
-
 	line := joinShortcuts(variants[len(variants)-1])
 	for _, items := range variants {
 		candidate := joinShortcuts(items)

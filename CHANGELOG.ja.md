@@ -6,6 +6,16 @@
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) です。
 
+## [Unreleased]
+
+### Added
+
+- 生存プロセス（PID あり）のみに絞り込む機能を追加（TUI の `p` キーまたは `-p` / `--pid` フラグ）。
+
+### Changed
+
+- TUI でグループを展開したとき、子ソケットをツリー表示にした。先頭は `▾`、途中の子は `├─`、最後の子は `└─`。
+
 ## [0.1.3] - 2026-08-16
 
 ### Changed

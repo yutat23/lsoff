@@ -101,6 +101,17 @@ func FilterProto(entries []Entry, tcp, udp bool) []Entry {
 	return out
 }
 
+// FilterHasPID returns only entries with a valid positive PID (a living, identifiable process).
+func FilterHasPID(entries []Entry) []Entry {
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.PID > 0 {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // UniquePIDs returns distinct positive PIDs in first-seen order.
 func UniquePIDs(entries []Entry) []int {
 	seen := make(map[int]struct{}, len(entries))

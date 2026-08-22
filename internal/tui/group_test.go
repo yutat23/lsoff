@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,25 +38,62 @@ func TestFlattenGroupsCollapsesSamePID(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("expanded len=%d, want 3", len(rows))
 	}
-	var exp, child, foundLeaf bool
-	for _, r := range rows {
-		if r.e.PID == 1 && r.fold == foldExpanded {
-			exp = true
-		}
-		if r.e.PID == 1 && r.fold == foldChild {
-			child = true
-		}
-		if r.e.PID == 2 && r.fold == foldNone {
-			foundLeaf = true
+	var exp, child *viewRow
+	for i := range rows {
+		switch {
+		case rows[i].fold == foldExpanded:
+			exp = &rows[i]
+		case rows[i].fold == foldChild:
+			child = &rows[i]
 		}
 	}
-	if !exp || !child || !foundLeaf {
-		t.Fatalf("expanded rows: %+v", rows)
+	if exp == nil || child == nil {
+		t.Fatalf("missing expanded head or child: %+v", rows)
+	}
+	if got := exp.mark(); got != "▾" {
+		t.Fatalf("expanded head mark=%q, want ▾", got)
+	}
+	if got := child.mark(); got != "└─" {
+		t.Fatalf("last child mark=%q, want └─", got)
+	}
+	if !child.last || child.id() != child.e.Key() {
+		t.Fatalf("child should be last keyed by socket: %+v", child)
+	}
+	for _, r := range rows {
+		if r.fold == foldNone && r.mark() != " " {
+			t.Fatalf("leaf mark=%q, want space", r.mark())
+		}
+	}
+}
+
+func TestFlattenGroupsTreeConnectorsOrder(t *testing.T) {
+	in := []listen.Entry{
+		{PID: 7, Proto: listen.TCP, Port: 3000, Addr: "127.0.0.1", Name: "vite"},
+		{PID: 7, Proto: listen.TCP, Port: 3000, Addr: "::1", Name: "vite"},
+		{PID: 7, Proto: listen.TCP, Port: 3001, Addr: "0.0.0.0", Name: "vite"},
+	}
+	rows := flattenGroups(in, listen.SortPort, false, map[int]bool{7: true})
+	if len(rows) != 3 {
+		t.Fatalf("len=%d, want 3", len(rows))
+	}
+	wantMarks := []string{"▾", "├─", "└─"}
+	for i, want := range wantMarks {
+		if got := rows[i].mark(); got != want {
+			t.Fatalf("row %d mark=%q, want %q", i, got, want)
+		}
+	}
+	if rows[2].fold != foldChild || !rows[2].last {
+		t.Fatalf("last row should be last child: %+v", rows[2])
+	}
+	m := model{width: 100}
+	line := m.formatRow(rows[2], false)
+	if !strings.HasPrefix(line, " └─ ") {
+		t.Fatalf("rendered last child line=%q", line)
 	}
 }
 
 func TestEnterTogglesFold(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false

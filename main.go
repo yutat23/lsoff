@@ -19,6 +19,7 @@ var version = "0.1.3"
 type config struct {
 	tcp     bool
 	udp     bool
+	pid     bool
 	json    bool
 	kill    bool
 	yes     bool
@@ -65,14 +66,16 @@ func run(args []string, in io.Reader, out, errw io.Writer) error {
 
 	useTUI := cfg.port == nil && !cfg.json && !cfg.kill && isTTY(out)
 	if useTUI {
-		return tui.Run(cfg.tcp, cfg.udp, cfg.query)
+		return tui.Run(cfg.tcp, cfg.udp, cfg.pid, cfg.query)
 	}
-
 	entries, err := listen.List()
 	if err != nil {
 		return err
 	}
 	entries = listen.FilterProto(entries, cfg.tcp, cfg.udp)
+	if cfg.pid {
+		entries = listen.FilterHasPID(entries)
+	}
 	if cfg.port != nil {
 		entries = listen.FilterPort(entries, *cfg.port)
 	}
@@ -84,7 +87,7 @@ func run(args []string, in io.Reader, out, errw io.Writer) error {
 		return runKill(cfg, entries, in, out, errw)
 	}
 
-	if len(entries) == 0 && (cfg.port != nil || cfg.query != "") {
+	if len(entries) == 0 && (cfg.port != nil || cfg.query != "" || cfg.pid) {
 		return &exitError{code: 1, msg: noneFound(cfg)}
 	}
 	if cfg.json {
@@ -152,6 +155,8 @@ func noneFound(cfg config) string {
 		return fmt.Sprintf("no listeners on port %d", *cfg.port)
 	case cfg.query != "":
 		return fmt.Sprintf("no listeners matching %q", cfg.query)
+	case cfg.pid:
+		return "no listeners with a living process"
 	default:
 		return "no listeners"
 	}
@@ -178,6 +183,8 @@ func parseArgs(args []string) (config, error) {
 			cfg.tcp = true
 		case a == "-u" || a == "--udp":
 			cfg.udp = true
+		case a == "-p" || a == "--pid" || a == "--process":
+			cfg.pid = true
 		case a == "-j" || a == "--json":
 			cfg.json = true
 		case a == "-k" || a == "--kill":
@@ -241,6 +248,7 @@ Usage:
 Flags:
   -t, --tcp          TCP only
   -u, --udp          UDP only
+  -p, --pid          only with valid PID (living process)
   -q, --query <str>  search (name, project, path, pid, port); words are AND
   -j, --json         JSON output
   -k, --kill         kill processes on <port>
@@ -250,6 +258,7 @@ TUI:
   / or click Search      filter as you type
   ↑/↓ / j/k / wheel      move
   click header           sort by column
+  p                      toggle living process filter (PID > 0)
   y                      copy addr:port
   a                      auto-refresh
   s / S                  sort / reverse

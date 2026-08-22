@@ -19,6 +19,7 @@ type viewRow struct {
 	e      listen.Entry
 	fold   foldState
 	hidden int
+	last   bool
 }
 
 func (r viewRow) id() string {
@@ -37,6 +38,11 @@ func (r viewRow) mark() string {
 		return "▸"
 	case foldExpanded:
 		return "▾"
+	case foldChild:
+		if r.last {
+			return "└─"
+		}
+		return "├─"
 	default:
 		return " "
 	}
@@ -87,8 +93,11 @@ func flattenGroups(entries []listen.Entry, key listen.SortKey, desc bool, expand
 		}
 		if expanded[g.pid] {
 			out = append(out, viewRow{e: g.sockets[0], fold: foldExpanded})
-			for _, e := range g.sockets[1:] {
-				out = append(out, viewRow{e: e, fold: foldChild})
+			for i, e := range g.sockets {
+				if i == 0 {
+					continue
+				}
+				out = append(out, viewRow{e: e, fold: foldChild, last: i == len(g.sockets)-1})
 			}
 			continue
 		}

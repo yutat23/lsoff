@@ -7,6 +7,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Toggle filtering out sockets without a living process with `p` in the TUI or `-p` / `--pid` CLI flag.
+
+### Changed
+
+- Expanded TUI groups render child sockets as a tree: `▾` on the head, `├─` for middle children and `└─` for the last.
+
 ## [0.1.3] - 2026-08-16
 
 ### Changed
