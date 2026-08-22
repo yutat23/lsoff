@@ -6,10 +6,11 @@
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) です。
 
-## [0.1.3] - 2026-08-16
+## [Unreleased]
 
 ### Changed
 
+- TUI でグループを展開したとき、子ソケットをツリー表示にした。先頭は `▾`、途中の子は `├─`、最後の子は `└─`。
 - TUI 下部のショートカットを、キー色とセパレータだけ残した控えめな表示にし、フッターの上にラインを引いた。
 
 ## [0.1.2] - 2026-08-16
