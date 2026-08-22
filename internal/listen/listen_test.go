@@ -40,6 +40,19 @@ func TestFilterProto(t *testing.T) {
 	}
 }
 
+func TestFilterHasPID(t *testing.T) {
+	in := []Entry{
+		{PID: 100, Port: 80},
+		{PID: 0, Port: 22},
+		{PID: -1, Port: 53},
+		{PID: 200, Port: 443},
+	}
+	got := FilterHasPID(in)
+	if len(got) != 2 || got[0].PID != 100 || got[1].PID != 200 {
+		t.Fatalf("FilterHasPID: %+v", got)
+	}
+}
+
 func TestUniquePIDs(t *testing.T) {
 	in := []Entry{
 		{PID: 10},

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Toggle filtering out sockets without a living process with `p` in the TUI or `-p` / `--pid` CLI flag.
+
 ### Changed
 
 - Expanded TUI groups render child sockets as a tree: `▾` on the head, `├─` for middle children and `└─` for the last.

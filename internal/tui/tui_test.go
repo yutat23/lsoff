@@ -33,7 +33,7 @@ func TestRowIndexAt(t *testing.T) {
 }
 
 func TestMouseSelectsRow(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false
@@ -60,7 +60,7 @@ func TestMouseSelectsRow(t *testing.T) {
 }
 
 func TestMouseWheel(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.rows = make([]viewRow, 5)
@@ -77,7 +77,7 @@ func TestMouseWheel(t *testing.T) {
 }
 
 func TestSlashStartsSearch(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false
@@ -102,7 +102,7 @@ func TestSlashStartsSearch(t *testing.T) {
 }
 
 func TestLetterDoesNotStartSearch(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false
@@ -126,7 +126,7 @@ func TestLetterDoesNotStartSearch(t *testing.T) {
 }
 
 func TestFilterCtrlCClearsLikeEsc(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false
@@ -157,7 +157,7 @@ func TestFilterCtrlCClearsLikeEsc(t *testing.T) {
 }
 
 func TestInitialQuery(t *testing.T) {
-	m := newModel(false, false, "sshd")
+	m := newModel(false, false, false, "sshd")
 	if m.filter.Value() != "sshd" || !m.filtering {
 		t.Fatalf("query not applied: %q filtering=%v", m.filter.Value(), m.filtering)
 	}
@@ -179,7 +179,7 @@ func TestSortKeyAtX(t *testing.T) {
 }
 
 func TestCycleSort(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	if m.sortKey != listen.SortPort {
 		t.Fatal(m.sortKey)
 	}
@@ -190,7 +190,7 @@ func TestCycleSort(t *testing.T) {
 }
 
 func TestHeaderClickTogglesSort(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.all = []listen.Entry{
@@ -237,7 +237,7 @@ func TestSelectedRowStylesWholeLine(t *testing.T) {
 }
 
 func TestStaleLoadIgnored(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.loadGen = 2
 	m.all = []listen.Entry{{Port: 1}}
 	next, _ := m.Update(loadedMsg{gen: 1, entries: []listen.Entry{{Port: 99}}})
@@ -260,7 +260,7 @@ func TestFormatRowSanitizes(t *testing.T) {
 }
 
 func TestJKMovesCursor(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.rows = make([]viewRow, 5)
@@ -283,9 +283,8 @@ func TestJKMovesCursor(t *testing.T) {
 }
 
 func TestShortcutBarAtBottom(t *testing.T) {
-	m := newModel(false, false, "")
-	m.width = 80
-	m.height = 24
+	m := newModel(false, false, false, "")
+	m.width = 100
 	view := m.View()
 	lines := strings.Split(view, "\n")
 	if len(lines) < 3 {
@@ -295,7 +294,7 @@ func TestShortcutBarAtBottom(t *testing.T) {
 		t.Fatalf("title should be first: %q", lines[0])
 	}
 	bar := lines[len(lines)-1]
-	for _, want := range []string{"search", "move", "expand", "copy", "auto", "sort", "kill", "quit"} {
+	for _, want := range []string{"search", "move", "expand", "pid", "copy", "auto", "sort", "kill", "quit"} {
 		if !strings.Contains(bar, want) {
 			t.Fatalf("shortcuts missing %q: %q", want, bar)
 		}
@@ -341,7 +340,7 @@ func TestRenderShortcutsFitsWidth(t *testing.T) {
 }
 
 func TestXStartsKillConfirm(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false
@@ -353,5 +352,48 @@ func TestXStartsKillConfirm(t *testing.T) {
 	got := next.(model)
 	if !got.confirm {
 		t.Fatal("expected confirm after x")
+	}
+}
+
+func TestTogglePIDFilter(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Port: 80, PID: 100, Name: "nginx"},
+		{Proto: listen.TCP, Port: 22, PID: 0, Name: "-"},
+		{Proto: listen.UDP, Port: 53, PID: 200, Name: "named"},
+	}
+	m.applyFilter()
+	if len(m.rows) != 3 {
+		t.Fatalf("initial rows=%d, want 3", len(m.rows))
+	}
+	// press p to toggle living process filter
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	got := next.(model)
+	if !got.onlyPID {
+		t.Fatal("expected onlyPID=true after pressing p")
+	}
+	if len(got.rows) != 2 {
+		t.Fatalf("filtered rows=%d, want 2", len(got.rows))
+	}
+	for _, r := range got.rows {
+		if r.e.PID <= 0 {
+			t.Fatalf("non-positive PID leaked: %+v", r)
+		}
+	}
+	view := got.View()
+	if !strings.Contains(view, "pid") {
+		t.Fatalf("expected header meta to indicate pid filter: %q", view)
+	}
+	// press p again to toggle off
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	got = next.(model)
+	if got.onlyPID {
+		t.Fatal("expected onlyPID=false after pressing p again")
+	}
+	if len(got.rows) != 3 {
+		t.Fatalf("restored rows=%d, want 3", len(got.rows))
 	}
 }

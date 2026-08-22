@@ -93,7 +93,7 @@ func TestFlattenGroupsTreeConnectorsOrder(t *testing.T) {
 }
 
 func TestEnterTogglesFold(t *testing.T) {
-	m := newModel(false, false, "")
+	m := newModel(false, false, false, "")
 	m.width = 80
 	m.height = 24
 	m.loading = false

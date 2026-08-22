@@ -30,6 +30,21 @@ func TestParseArgsPortAndFlags(t *testing.T) {
 	}
 }
 
+func TestParseArgsPID(t *testing.T) {
+	cfg, err := parseArgs([]string{"-p"})
+	if err != nil || !cfg.pid {
+		t.Fatalf("-p: %+v err=%v", cfg, err)
+	}
+	cfg, err = parseArgs([]string{"--pid"})
+	if err != nil || !cfg.pid {
+		t.Fatalf("--pid: %+v err=%v", cfg, err)
+	}
+	cfg, err = parseArgs([]string{"--process"})
+	if err != nil || !cfg.pid {
+		t.Fatalf("--process: %+v err=%v", cfg, err)
+	}
+}
+
 func TestParseArgsKill(t *testing.T) {
 	cfg, err := parseArgs([]string{"-k", "-y", "80"})
 	if err != nil {

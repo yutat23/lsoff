@@ -52,6 +52,7 @@ lsoff 8080            # ポート 8080 を掴んでいるプロセスを表示
 lsoff nginx           # 名前・パス・PID・cmdline・プロジェクト・サービス名などで検索
 lsoff -q "node 8080"  # 空白区切りは AND
 lsoff -t              # TCP だけ（TUI）
+lsoff -p              # 有効な PID（生存プロセス）のみ
 lsoff -u 53           # UDP の 53 番
 lsoff --json nginx    # 検索結果を JSON で
 lsoff -k 8080         # そのポートのプロセスを終了（確認あり）
@@ -75,6 +76,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `↑` / `↓` / `j` / `k` / クリック / ホイール | 移動・選択（検索中も可） |
 | ヘッダークリック | その列でソート（もう一度で降順） |
 | `s` / `S` | ソート列を切り替え / 昇降順 |
+| `p` | 生存プロセス（PID あり）のみに絞り込み切り替え |
 | `y` | 選択中の `addr:port` をコピー |
 | `a` | 2 秒ごとの自動更新 |
 | `enter` / `space` / click `▸` | 同じ PID のポートを展開・折りたたみ |
