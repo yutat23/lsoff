@@ -11,11 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Toggle filtering out sockets without a living process with `p` in the TUI or `-p` / `--pid` CLI flag.
+- Hide rows with an unknown PID (`PID <= 0`) with `p` in the TUI or the `-p` / `--pid` CLI flag. Like `-t` / `-u`, it is a view filter, so an empty result is an empty table or `[]`, not an error.
 
 ### Changed
 
-- Expanded TUI groups render child sockets as a tree: `▾` on the head, `├─` for middle children and `└─` for the last.
+- Expanded TUI groups render child sockets as a tree: `▾` on the head, `├─` for children before the last, and `└─` for the last one. The mark column is a fixed width, so the columns stay aligned with the header on every row.
 
 ## [0.1.3] - 2026-08-16
 

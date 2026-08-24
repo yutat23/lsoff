@@ -163,18 +163,78 @@ func TestInitialQuery(t *testing.T) {
 	}
 }
 
+// cellX returns the display column where sub starts in line, ignoring styling.
+func cellX(t *testing.T, line, sub string) int {
+	t.Helper()
+	plain := listen.SanitizeDisplay(line)
+	i := strings.Index(plain, sub)
+	if i < 0 {
+		t.Fatalf("%q not found in %q", sub, plain)
+	}
+	return lipgloss.Width(plain[:i])
+}
+
+// headerCells pairs a header label with a row value that lands in that column.
+// PORT and PID are right-aligned, so the 4-digit port and 3-digit pid below sit
+// under the 4- and 3-character labels.
+var headerCells = []struct {
+	label string
+	value string
+	sort  listen.SortKey
+}{
+	{"PROTO", "tcp", listen.SortProto},
+	{"PORT", "8080", listen.SortPort},
+	{"ADDRESS", "127.0.0.1", listen.SortAddr},
+	{"PID", "900", listen.SortPID},
+	{"PROJECT", "lsoff", listen.SortProject},
+	{"PROCESS", "node", listen.SortName},
+}
+
+// TestRowsAlignWithHeader checks the grid itself: the tree connectors (├─ / └─)
+// are two cells wide, so a child row must not shift PROTO and the columns after
+// it by a cell.
+func TestRowsAlignWithHeader(t *testing.T) {
+	m := model{width: 120}
+	header := m.formatHeader()
+	e := listen.Entry{Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", PID: 900, Name: "node", Project: "lsoff"}
+	rows := []struct {
+		name string
+		row  viewRow
+	}{
+		{"leaf", viewRow{e: e}},
+		{"collapsed head", viewRow{e: e, fold: foldCollapsed, hidden: 2}},
+		{"expanded head", viewRow{e: e, fold: foldExpanded}},
+		{"middle child", viewRow{e: e, fold: foldChild}},
+		{"last child", viewRow{e: e, fold: foldChild, last: true}},
+	}
+	for _, r := range rows {
+		for _, selected := range []bool{false, true} {
+			line := m.formatRow(r.row, selected)
+			for _, c := range headerCells {
+				want := cellX(t, header, c.label)
+				if got := cellX(t, line, c.value); got != want {
+					t.Fatalf("%s (selected=%v): %s starts at column %d, header %s at %d\nheader: %q\nrow:    %q",
+						r.name, selected, c.value, got, c.label, want, header, listen.SanitizeDisplay(line))
+				}
+			}
+		}
+	}
+}
+
 func TestSortKeyAtX(t *testing.T) {
-	if sortKeyAtX(2) != listen.SortProto {
-		t.Fatal("proto")
+	m := model{width: 120}
+	header := m.formatHeader()
+	for _, c := range headerCells {
+		x := cellX(t, header, c.label)
+		if got := sortKeyAtX(x); got != c.sort {
+			t.Fatalf("click on %s (x=%d): got %v, want %v", c.label, x, got, c.sort)
+		}
 	}
-	if sortKeyAtX(10) != listen.SortPort {
-		t.Fatal("port")
+	if sortKeyAtX(0) != listen.SortProto {
+		t.Fatal("click on the mark column should sort by proto")
 	}
-	if sortKeyAtX(50) != listen.SortProject {
-		t.Fatal("project")
-	}
-	if sortKeyAtX(70) != listen.SortName {
-		t.Fatal("name")
+	if sortKeyAtX(1000) != listen.SortName {
+		t.Fatal("click past the last column should sort by name")
 	}
 }
 
@@ -225,13 +285,14 @@ func TestProtoCellColors(t *testing.T) {
 func TestSelectedRowStylesWholeLine(t *testing.T) {
 	m := model{width: 80}
 	e := listen.Entry{Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", PID: 1, Name: "node", Project: "lsoff"}
+	prefix := strings.Repeat(" ", colProtoX)
 	rest := fmt.Sprintf("  %5d  %-21s  %7s  %-14s  %s", 8080, "127.0.0.1", "1", "lsoff", "node")
 	got := m.formatRow(viewRow{e: e}, true)
-	want := selStyle.Render(padRight("   "+fmt.Sprintf("%-4s", "tcp")+rest, 80))
+	want := selStyle.Render(padRight(prefix+fmt.Sprintf("%-5s", "tcp")+rest, 80))
 	if got != want {
 		t.Fatalf("selected row should style the whole uncolored line\ngot:  %q\nwant: %q", got, want)
 	}
-	if unsel := m.formatRow(viewRow{e: e}, false); unsel != "   "+protoCell(listen.TCP)+rest {
+	if unsel := m.formatRow(viewRow{e: e}, false); unsel != prefix+protoCell(listen.TCP)+rest {
 		t.Fatalf("unselected: %q", unsel)
 	}
 }
@@ -369,7 +430,7 @@ func TestTogglePIDFilter(t *testing.T) {
 	if len(m.rows) != 3 {
 		t.Fatalf("initial rows=%d, want 3", len(m.rows))
 	}
-	// press p to toggle living process filter
+	// press p to hide rows with an unknown PID
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	got := next.(model)
 	if !got.onlyPID {

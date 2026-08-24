@@ -39,9 +39,94 @@ func TestParseArgsPID(t *testing.T) {
 	if err != nil || !cfg.pid {
 		t.Fatalf("--pid: %+v err=%v", cfg, err)
 	}
-	cfg, err = parseArgs([]string{"--process"})
-	if err != nil || !cfg.pid {
-		t.Fatalf("--process: %+v err=%v", cfg, err)
+	if _, err := parseArgs([]string{"--process"}); err == nil {
+		t.Fatal("expected error: --process is not a flag")
+	}
+}
+
+// stubEntries replaces the socket source so CLI behaviour is testable without
+// depending on what the machine happens to be listening on.
+func stubEntries(t *testing.T, entries []listen.Entry) {
+	t.Helper()
+	prev := listAll
+	listAll = func() ([]listen.Entry, error) { return entries, nil }
+	t.Cleanup(func() { listAll = prev })
+}
+
+func pidFixture() []listen.Entry {
+	return []listen.Entry{
+		{Proto: listen.TCP, Port: 2222, Addr: "0.0.0.0", PID: 0, Name: ""},
+		{Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", PID: 41233, Name: "node", Project: "lsoff"},
+	}
+}
+
+func TestRunPIDFiltersTable(t *testing.T) {
+	stubEntries(t, pidFixture())
+	var out, errw bytes.Buffer
+	if err := run([]string{"-p"}, strings.NewReader(""), &out, &errw); err != nil {
+		t.Fatalf("-p: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want header + 1 row, got %d lines:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[1], "41233") || !strings.Contains(lines[1], "node") {
+		t.Fatalf("pid row missing: %q", lines[1])
+	}
+	if strings.Contains(out.String(), "2222") {
+		t.Fatalf("unknown-PID row not filtered:\n%s", out.String())
+	}
+}
+
+func TestRunPIDFiltersJSON(t *testing.T) {
+	stubEntries(t, pidFixture())
+	var out, errw bytes.Buffer
+	if err := run([]string{"-p", "-j"}, strings.NewReader(""), &out, &errw); err != nil {
+		t.Fatalf("-p -j: %v", err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("%v: %s", err, out.String())
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 entry, got %d: %s", len(got), out.String())
+	}
+	if got[0]["pid"].(float64) != 41233 || got[0]["port"].(float64) != 8080 {
+		t.Fatalf("wrong entry kept: %s", out.String())
+	}
+}
+
+// -p is a view filter, so an empty result is an empty view, not an error.
+func TestRunPIDEmptyExitsZero(t *testing.T) {
+	stubEntries(t, []listen.Entry{{Proto: listen.TCP, Port: 2222, Addr: "0.0.0.0", PID: 0}})
+
+	var out, errw bytes.Buffer
+	if err := run([]string{"-p"}, strings.NewReader(""), &out, &errw); err != nil {
+		t.Fatalf("-p with no PID rows should exit 0: %v", err)
+	}
+	if !strings.Contains(out.String(), "PROTO") || strings.Contains(out.String(), "2222") {
+		t.Fatalf("want an empty table:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := run([]string{"-p", "-j"}, strings.NewReader(""), &out, &errw); err != nil {
+		t.Fatalf("-p -j with no PID rows should exit 0: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "[]" {
+		t.Fatalf("want []: %q", out.String())
+	}
+}
+
+// A port or query is a lookup, so no match still exits 1 even with -p.
+func TestRunPIDWithLookupStillExitsOne(t *testing.T) {
+	stubEntries(t, pidFixture())
+	for _, args := range [][]string{{"-p", "8081"}, {"-p", "-j", "8081"}, {"-p", "redis"}} {
+		var out, errw bytes.Buffer
+		err := run(args, strings.NewReader(""), &out, &errw)
+		var ee *exitError
+		if !errors.As(err, &ee) || ee.code != 1 {
+			t.Fatalf("%v: err=%v, want exit 1", args, err)
+		}
 	}
 }
 

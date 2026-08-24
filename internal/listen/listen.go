@@ -101,7 +101,9 @@ func FilterProto(entries []Entry, tcp, udp bool) []Entry {
 	return out
 }
 
-// FilterHasPID returns only entries with a valid positive PID (a living, identifiable process).
+// FilterHasPID returns only entries with a known PID (PID > 0). A PID can be
+// missing because of permissions, so this hides unidentifiable rows; it does
+// not check whether the process is still alive.
 func FilterHasPID(entries []Entry) []Entry {
 	out := make([]Entry, 0, len(entries))
 	for _, e := range entries {

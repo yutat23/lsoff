@@ -48,6 +48,13 @@ func (r viewRow) mark() string {
 	}
 }
 
+// markCell is mark() padded to the width of the mark column, so a two-cell
+// tree connector and a one-cell ▸ / ▾ leave the following columns on the same
+// grid.
+func (r viewRow) markCell() string {
+	return padRight(r.mark(), markWidth)
+}
+
 type procBucket struct {
 	pid     int
 	sockets []listen.Entry

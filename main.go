@@ -16,6 +16,9 @@ import (
 
 var version = "0.1.3"
 
+// listAll is the socket source. Tests replace it with a fixture.
+var listAll = listen.List
+
 type config struct {
 	tcp     bool
 	udp     bool
@@ -68,7 +71,7 @@ func run(args []string, in io.Reader, out, errw io.Writer) error {
 	if useTUI {
 		return tui.Run(cfg.tcp, cfg.udp, cfg.pid, cfg.query)
 	}
-	entries, err := listen.List()
+	entries, err := listAll()
 	if err != nil {
 		return err
 	}
@@ -87,7 +90,9 @@ func run(args []string, in io.Reader, out, errw io.Writer) error {
 		return runKill(cfg, entries, in, out, errw)
 	}
 
-	if len(entries) == 0 && (cfg.port != nil || cfg.query != "" || cfg.pid) {
+	// -p is a view filter like -t / -u, so an empty result is not an error.
+	// Only an explicit lookup (port or query) that matches nothing exits 1.
+	if len(entries) == 0 && (cfg.port != nil || cfg.query != "") {
 		return &exitError{code: 1, msg: noneFound(cfg)}
 	}
 	if cfg.json {
@@ -155,8 +160,6 @@ func noneFound(cfg config) string {
 		return fmt.Sprintf("no listeners on port %d", *cfg.port)
 	case cfg.query != "":
 		return fmt.Sprintf("no listeners matching %q", cfg.query)
-	case cfg.pid:
-		return "no listeners with a living process"
 	default:
 		return "no listeners"
 	}
@@ -183,7 +186,7 @@ func parseArgs(args []string) (config, error) {
 			cfg.tcp = true
 		case a == "-u" || a == "--udp":
 			cfg.udp = true
-		case a == "-p" || a == "--pid" || a == "--process":
+		case a == "-p" || a == "--pid":
 			cfg.pid = true
 		case a == "-j" || a == "--json":
 			cfg.json = true
@@ -248,7 +251,7 @@ Usage:
 Flags:
   -t, --tcp          TCP only
   -u, --udp          UDP only
-  -p, --pid          only with valid PID (living process)
+  -p, --pid          hide rows with an unknown PID
   -q, --query <str>  search (name, project, path, pid, port); words are AND
   -j, --json         JSON output
   -k, --kill         kill processes on <port>
@@ -258,7 +261,7 @@ TUI:
   / or click Search      filter as you type
   ↑/↓ / j/k / wheel      move
   click header           sort by column
-  p                      toggle living process filter (PID > 0)
+  p                      hide rows with an unknown PID
   y                      copy addr:port
   a                      auto-refresh
   s / S                  sort / reverse
