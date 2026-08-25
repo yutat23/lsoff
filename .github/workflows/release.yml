@@ -172,3 +172,49 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "lsoff ${version}"
           git push
+
+  # Requires repo secret WINGET_CREATE_GITHUB_TOKEN: a PAT that can write to
+  # yutat23/winget-pkgs and submit a PR to microsoft/winget-pkgs.
+  winget:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Verify token
+        shell: pwsh
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) {
+            throw "Repository secret WINGET_CREATE_GITHUB_TOKEN is not configured."
+          }
+      - name: Sync WinGet fork
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          gh api --method POST repos/yutat23/winget-pkgs/merge-upstream -f branch=master
+      - name: Submit WinGet update
+        shell: pwsh
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $baseUrl = "https://github.com/yutat23/lsoff/releases/download/v${version}"
+          $releaseUrl = "https://github.com/yutat23/lsoff/releases/tag/v${version}"
+
+          & .\wingetcreate.exe update yutat23.lsoff `
+            --version $version `
+            --urls `
+              "${baseUrl}/lsoff-windows-amd64.exe|x64" `
+              "${baseUrl}/lsoff-windows-arm64.exe|arm64" `
+              "${baseUrl}/lsoff-windows-386.exe|x86" `
+            --release-notes-url $releaseUrl `
+            --submit `
+            --no-open
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "wingetcreate failed with exit code $LASTEXITCODE."
+          }
