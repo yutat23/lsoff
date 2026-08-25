@@ -683,19 +683,21 @@ func renderShortcuts(width int) string {
 		{enter, "expand", shortcutKey},
 		{"p", "pid", shortcutKey},
 		{"y", "copy", shortcutKey},
-		{"a", "auto", shortcutKey},
+		{"a", "auto-refresh", shortcutKey},
+		{"r", "reload", shortcutKey},
 		{"s", "sort", shortcutKey},
 		{"x", "kill", shortcutDanger},
 		{"q", "quit", shortcutQuit},
 	}
 	variants := [][]shortcutItem{
 		all,
-		{all[0], all[1], all[2], all[3], all[4], all[5], all[7], all[8]},
-		{all[0], all[1], all[2], all[3], all[4], all[7], all[8]},
-		{all[0], all[1], all[2], all[3], all[7], all[8]},
-		{all[0], all[1], all[2], all[7], all[8]},
-		{all[0], all[1], all[7], all[8]},
-		{all[0], all[7], all[8]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[8], all[9]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[8], all[9]},
+		{all[0], all[1], all[2], all[3], all[4], all[8], all[9]},
+		{all[0], all[1], all[2], all[3], all[8], all[9]},
+		{all[0], all[1], all[2], all[8], all[9]},
+		{all[0], all[1], all[8], all[9]},
+		{all[0], all[8], all[9]},
 	}
 	line := joinShortcuts(variants[len(variants)-1])
 	for _, items := range variants {

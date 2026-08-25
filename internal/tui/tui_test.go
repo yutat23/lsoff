@@ -345,7 +345,7 @@ func TestJKMovesCursor(t *testing.T) {
 
 func TestShortcutBarAtBottom(t *testing.T) {
 	m := newModel(false, false, false, "")
-	m.width = 100
+	m.width = 120
 	view := m.View()
 	lines := strings.Split(view, "\n")
 	if len(lines) < 3 {
@@ -355,7 +355,7 @@ func TestShortcutBarAtBottom(t *testing.T) {
 		t.Fatalf("title should be first: %q", lines[0])
 	}
 	bar := lines[len(lines)-1]
-	for _, want := range []string{"search", "move", "expand", "pid", "copy", "auto", "sort", "kill", "quit"} {
+	for _, want := range []string{"search", "move", "expand", "pid", "copy", "auto-refresh", "reload", "sort", "kill", "quit"} {
 		if !strings.Contains(bar, want) {
 			t.Fatalf("shortcuts missing %q: %q", want, bar)
 		}

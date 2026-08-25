@@ -263,12 +263,12 @@ TUI:
   click header           sort by column
   p                      hide rows with an unknown PID
   y                      copy addr:port
-  a                      auto-refresh
+  a                      auto-refresh every 2s
   s / S                  sort / reverse
   enter / space          expand or collapse a process
   h / l                  collapse / expand
   esc / ctrl+c           clear search
-  r                      refresh
+  r                      reload now
   x                      kill selected process (asks for confirmation)
   q                      quit
 `

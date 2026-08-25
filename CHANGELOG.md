@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Expanded TUI groups render child sockets as a tree: `▾` on the head, `├─` for children before the last, and `└─` for the last one. The mark column is a fixed width, so the columns stay aligned with the header on every row.
+- TUI footer shows `a auto-refresh` and `r reload` (reload was missing from the bar).
 
 ## [0.1.3] - 2026-08-16
 

@@ -80,11 +80,11 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
 | `p` | Hide rows with an unknown PID (toggle) |
 | `y` | Copy the selected `addr:port` |
-| `a` | Auto-refresh every 2 seconds |
+| `a` | Auto-refresh every 2 seconds (toggle) |
 | `enter` / `space` / click `▸` | Expand or collapse sockets for the same PID |
 | `h` / `l` | Collapse / expand |
 | `esc` / `ctrl+c` | Clear the search |
-| `r` | Reload |
+| `r` | Reload the list now |
 | `x` | Kill the selected process (asks first) |
 | `q` | Quit |
 
