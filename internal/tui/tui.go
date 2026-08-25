@@ -21,6 +21,21 @@ const (
 	autoInterval = 2 * time.Second
 )
 
+// Table grid, in terminal cells. The tree connectors (├─ / └─) are two cells
+// wide, so the mark column is markWidth wide and narrower marks (▸ / ▾ / none)
+// are padded to it. That keeps PROTO and every column after it on the header's
+// grid for parent and child rows alike. formatHeader and formatRow must use the
+// widths these offsets are built from; TestRowsAlignWithHeader checks that.
+const (
+	markWidth   = 2
+	colProtoX   = 1 + markWidth + 1 // leading space, mark, space
+	colPortX    = colProtoX + 5 + 2 // PROTO is 5 cells ("PROTO"), then a 2-cell gap
+	colAddrX    = colPortX + 5 + 2
+	colPIDX     = colAddrX + 21 + 2
+	colProjectX = colPIDX + 7 + 2
+	colProcessX = colProjectX + 14 + 2
+)
+
 var (
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81"))
 	helpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -72,6 +87,7 @@ type model struct {
 	loadGen   int
 	wantTCP   bool
 	wantUDP   bool
+	onlyPID   bool
 	auto      bool
 	sortKey   listen.SortKey
 	sortDesc  bool
@@ -79,14 +95,14 @@ type model struct {
 }
 
 // Run starts the interactive TUI.
-func Run(tcp, udp bool, query string) error {
-	m := newModel(tcp, udp, query)
+func Run(tcp, udp, onlyPID bool, query string) error {
+	m := newModel(tcp, udp, onlyPID, query)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
 
-func newModel(tcp, udp bool, query string) model {
+func newModel(tcp, udp, onlyPID bool, query string) model {
 	ti := textinput.New()
 	ti.Placeholder = "/ to search"
 	ti.CharLimit = 80
@@ -98,6 +114,7 @@ func newModel(tcp, udp bool, query string) model {
 		loadGen:  1,
 		wantTCP:  tcp,
 		wantUDP:  udp,
+		onlyPID:  onlyPID,
 		expanded: make(map[int]bool),
 	}
 	if query != "" {
@@ -240,7 +257,7 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			m.cursor = i
 			m.clamp()
-			if msg.X < 3 {
+			if msg.X < colProtoX {
 				m.toggleFold()
 			}
 		}
@@ -362,6 +379,14 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sortDesc = !m.sortDesc
 		m.applyFilter()
 		m.status = "sort " + m.sortKey.String()
+	case "p", "P":
+		m.onlyPID = !m.onlyPID
+		if m.onlyPID {
+			m.status = "hiding rows with an unknown pid"
+		} else {
+			m.status = "showing all listeners"
+		}
+		m.applyFilter()
 		return m, nil
 	case "y":
 		e, ok := m.selected()
@@ -441,17 +466,19 @@ func (m *model) cycleSort() {
 	m.sortKey = listen.SortPort
 }
 
+// sortKeyAtX maps a header click to a column. The gap before a column belongs
+// to the column on its left.
 func sortKeyAtX(x int) listen.SortKey {
 	switch {
-	case x < 9:
+	case x < colPortX:
 		return listen.SortProto
-	case x < 16:
+	case x < colAddrX:
 		return listen.SortPort
-	case x < 39:
+	case x < colPIDX:
 		return listen.SortAddr
-	case x < 48:
+	case x < colProjectX:
 		return listen.SortPID
-	case x < 64:
+	case x < colProcessX:
 		return listen.SortProject
 	default:
 		return listen.SortName
@@ -490,7 +517,11 @@ func (m *model) applyFilter() {
 			keep = append(keep, "p/"+strconv.Itoa(r.e.PID))
 		}
 	}
-	filtered := listen.FilterQuery(m.all, m.filter.Value())
+	entries := m.all
+	if m.onlyPID {
+		entries = listen.FilterHasPID(entries)
+	}
+	filtered := listen.FilterQuery(entries, m.filter.Value())
 	m.rows = flattenGroups(filtered, m.sortKey, m.sortDesc, m.expanded)
 	for _, id := range keep {
 		for i, r := range m.rows {
@@ -567,7 +598,11 @@ func (m model) View() string {
 	if m.sortDesc {
 		arrow = "↓"
 	}
-	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s  %s%s", len(m.rows), len(m.all), protoLabel(m.wantTCP, m.wantUDP), m.sortKey.String(), arrow))
+	flags := protoLabel(m.wantTCP, m.wantUDP)
+	if m.onlyPID {
+		flags += "  pid"
+	}
+	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s  %s%s", len(m.rows), len(m.all), flags, m.sortKey.String(), arrow))
 	if m.auto {
 		meta += helpStyle.Render("  auto")
 	}
@@ -646,6 +681,7 @@ func renderShortcuts(width int) string {
 		{"/", "search", shortcutKey},
 		{"j/k", "move", shortcutKey},
 		{enter, "expand", shortcutKey},
+		{"p", "pid", shortcutKey},
 		{"y", "copy", shortcutKey},
 		{"a", "auto", shortcutKey},
 		{"s", "sort", shortcutKey},
@@ -654,13 +690,13 @@ func renderShortcuts(width int) string {
 	}
 	variants := [][]shortcutItem{
 		all,
-		{all[0], all[1], all[2], all[3], all[4], all[6], all[7]},
-		{all[0], all[1], all[2], all[3], all[6], all[7]},
-		{all[0], all[1], all[2], all[6], all[7]},
-		{all[0], all[1], all[6], all[7]},
-		{all[0], all[6], all[7]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[7], all[8]},
+		{all[0], all[1], all[2], all[3], all[4], all[7], all[8]},
+		{all[0], all[1], all[2], all[3], all[7], all[8]},
+		{all[0], all[1], all[2], all[7], all[8]},
+		{all[0], all[1], all[7], all[8]},
+		{all[0], all[7], all[8]},
 	}
-
 	line := joinShortcuts(variants[len(variants)-1])
 	for _, items := range variants {
 		candidate := joinShortcuts(items)
@@ -697,7 +733,8 @@ func protoLabel(tcp, udp bool) string {
 }
 
 func (m model) formatHeader() string {
-	return fmt.Sprintf("   %-4s  %5s  %-21s  %7s  %-14s  %s", "PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS")
+	return fmt.Sprintf("%s%-5s  %5s  %-21s  %7s  %-14s  %s",
+		strings.Repeat(" ", colProtoX), "PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS")
 }
 
 func (m model) formatRow(r viewRow, selected bool) string {
@@ -713,20 +750,20 @@ func (m model) formatRow(r viewRow, selected bool) string {
 	if proj == "" {
 		proj = "-"
 	}
-	maxName := max(8, m.width-64)
+	maxName := max(8, m.width-colProcessX)
 	name = truncate(name, maxName)
 	addr := truncate(listen.SanitizeDisplay(e.Addr), 21)
-	proto := fmt.Sprintf("%-4s", e.Proto.String())
+	proto := fmt.Sprintf("%-5s", e.Proto.String())
 	rest := fmt.Sprintf("  %5d  %-21s  %7s  %-14s  %s", e.Port, addr, pidCell(e.PID), truncate(proj, 14), name)
-	line := " " + r.mark() + " " + proto + rest
+	mark := " " + r.markCell() + " "
 	if selected {
-		return selStyle.Render(padRight(line, m.width))
+		return selStyle.Render(padRight(mark+proto+rest, m.width))
 	}
-	return " " + r.mark() + " " + protoCell(e.Proto) + rest
+	return mark + protoCell(e.Proto) + rest
 }
 
 func protoCell(p listen.Proto) string {
-	s := fmt.Sprintf("%-4s", p.String())
+	s := fmt.Sprintf("%-5s", p.String())
 	if p == listen.UDP {
 		return udpStyle.Render(s)
 	}

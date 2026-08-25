@@ -6,6 +6,16 @@
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) です。
 
+## [Unreleased]
+
+### Added
+
+- PID が不明な行（`PID <= 0`）を隠す機能を追加（TUI の `p` キーまたは `-p` / `--pid` フラグ）。`-t` / `-u` と同じ表示フィルタなので、0 件でもエラーにはせず、空の表または `[]` を返す。
+
+### Changed
+
+- TUI でグループを展開したとき、子ソケットをツリー表示にした。先頭は `▾`、最後以外の子は `├─`、最後の子は `└─`。マーク列の幅は固定なので、どの行でも列がヘッダーと揃う。
+
 ## [0.1.3] - 2026-08-16
 
 ### Changed
