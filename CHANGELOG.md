@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-25
+
 ### Added
 
 - Hide rows with an unknown PID (`PID <= 0`) with `p` in the TUI or the `-p` / `--pid` CLI flag. Like `-t` / `-u`, it is a view filter, so an empty result is an empty table or `[]`, not an error.
@@ -47,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release: list listening TCP/UDP ports on Windows, Linux, and macOS, with an interactive TUI and optional kill.
 
+[0.1.4]: https://github.com/yutat23/lsoff/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/yutat23/lsoff/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yutat23/lsoff/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yutat23/lsoff/compare/v0.1.0...v0.1.1
