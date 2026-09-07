@@ -109,7 +109,7 @@ CLI の `-k` も同じです。同じ PID が IPv4/IPv6 で二重に出ていて
 | OS | API |
 |----|-----|
 | Linux | `/proc/net/{tcp,tcp6,udp,udp6}`、`/proc/<pid>/{fd,cmdline,cwd}` |
-| macOS | `libproc`（ソケットと cwd）と `sysctl kern.procargs2` |
+| macOS | `sysctl net.inet.{tcp,udp}.pcblist64`（全リスナー）、`libproc`（所有プロセスと cwd）、`sysctl kern.procargs2` |
 | Windows | IP Helper、`QueryFullProcessImageName`、`NtQueryInformationProcess`（cmdline と cwd） |
 
 権限のないプロセスは PID やパス、cmdline が空になることがあります。その場合は root / Administrator で実行してください。

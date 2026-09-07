@@ -111,3 +111,59 @@ func TestEnterTogglesFold(t *testing.T) {
 		t.Fatalf("after enter: %+v", got.rows)
 	}
 }
+
+// TestFlattenGroupsKeepsGroupsWithSameKey covers two PID-0 rows on the same
+// proto/addr/port: their representative Entry.Key() is identical, which used to
+// make one group render twice while the other disappeared.
+func TestFlattenGroupsKeepsGroupsWithSameKey(t *testing.T) {
+	in := []listen.Entry{
+		{PID: 0, Proto: listen.TCP, Port: 80, Addr: "0.0.0.0", Name: "a"},
+		{PID: 0, Proto: listen.TCP, Port: 80, Addr: "0.0.0.0", Name: "b"},
+		{PID: 5, Proto: listen.TCP, Port: 22, Addr: "0.0.0.0", Name: "sshd"},
+	}
+	rows := flattenGroups(in, listen.SortPort, false, nil)
+	if len(rows) != 3 {
+		t.Fatalf("len=%d, want 3: %+v", len(rows), rows)
+	}
+	got := make([]string, len(rows))
+	seen := make(map[string]int)
+	for i, r := range rows {
+		got[i] = r.e.Name
+		seen[r.e.Name]++
+	}
+	if got[0] != "sshd" {
+		t.Fatalf("port 22 should sort first: %v", got)
+	}
+	for _, name := range []string{"a", "b", "sshd"} {
+		if seen[name] != 1 {
+			t.Fatalf("%q appears %d times, want once: %v", name, seen[name], got)
+		}
+	}
+}
+
+func TestSortGroupsOrderMatchesSortBy(t *testing.T) {
+	entries := []listen.Entry{
+		{PID: 3, Proto: listen.TCP, Port: 443, Addr: "0.0.0.0", Name: "nginx", Project: "web"},
+		{PID: 1, Proto: listen.UDP, Port: 53, Addr: "127.0.0.1", Name: "named", Project: "dns"},
+		{PID: 2, Proto: listen.TCP, Port: 22, Addr: "::", Name: "sshd", Project: "ops"},
+		{PID: 4, Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", Name: "node", Project: "app"},
+	}
+	keys := []listen.SortKey{listen.SortPort, listen.SortProto, listen.SortAddr, listen.SortPID, listen.SortName, listen.SortProject}
+	for _, key := range keys {
+		for _, desc := range []bool{false, true} {
+			want := make([]listen.Entry, len(entries))
+			copy(want, entries)
+			listen.SortBy(want, key, desc)
+
+			rows := flattenGroups(entries, key, desc, nil)
+			if len(rows) != len(want) {
+				t.Fatalf("key=%v desc=%v: len=%d", key, desc, len(rows))
+			}
+			for i := range want {
+				if rows[i].e != want[i] {
+					t.Fatalf("key=%v desc=%v: row %d = %q, want %q", key, desc, i, rows[i].e.Name, want[i].Name)
+				}
+			}
+		}
+	}
+}

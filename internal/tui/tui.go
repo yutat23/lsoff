@@ -69,7 +69,14 @@ type killedMsg struct {
 	err error
 }
 
-type tickMsg time.Time
+// tickMsg carries the generation of the auto-refresh chain that scheduled it.
+// Toggling auto-refresh bumps model.autoGen, so ticks from a chain armed by an
+// earlier toggle are recognised as stale and dropped instead of re-arming a
+// second chain.
+type tickMsg struct {
+	t   time.Time
+	gen int
+}
 
 type model struct {
 	all       []listen.Entry
@@ -89,6 +96,7 @@ type model struct {
 	wantUDP   bool
 	onlyPID   bool
 	auto      bool
+	autoGen   int
 	sortKey   listen.SortKey
 	sortDesc  bool
 	expanded  map[int]bool
@@ -149,7 +157,8 @@ func (m model) autoTick() tea.Cmd {
 	if !m.auto {
 		return nil
 	}
-	return tea.Tick(autoInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+	gen := m.autoGen
+	return tea.Tick(autoInterval, func(t time.Time) tea.Msg { return tickMsg{t: t, gen: gen} })
 }
 
 func killCmd(id listen.Ident) tea.Cmd {
@@ -191,7 +200,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.beginLoad()
 
 	case tickMsg:
-		if !m.auto {
+		// A tick from a chain armed before the last auto-refresh toggle is
+		// stale: dropping it (without re-arming) keeps exactly one chain alive.
+		if !m.auto || msg.gen != m.autoGen {
 			return m, nil
 		}
 		if m.confirm {
@@ -360,6 +371,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.beginLoad()
 	case "a":
 		m.auto = !m.auto
+		m.autoGen++
 		if m.auto {
 			m.status = "auto-refresh on"
 			if m.loading {
@@ -631,10 +643,14 @@ func (m model) View() string {
 		if svc == "" {
 			svc = strings.Join(listen.SearchTerms(e.Proto, e.Port), ", ")
 		}
-		b.WriteString(pathStyle.Render("SVC   "+dash(svc)) + "\n")
-		b.WriteString(pathStyle.Render("PATH  "+dash(listen.SanitizeDisplay(e.Path))) + "\n")
-		b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), max(8, m.width-6)))) + "\n")
-		b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.SanitizeDisplay(listen.ShortCwd(e.Cwd)), max(8, m.width-6)))) + "\n")
+		// Every detail line is prefixed with a 6-cell label, so its value gets
+		// width-6 cells. Without this a long macOS bundle path wraps in the
+		// terminal and pushes the footer off screen.
+		detail := max(8, m.width-6)
+		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
+		b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
+		b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
+		b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.SanitizeDisplay(listen.ShortCwd(e.Cwd)), detail))) + "\n")
 	} else {
 		b.WriteString("\n\n\n\n")
 	}
@@ -643,11 +659,12 @@ func (m model) View() string {
 	case m.confirm:
 		e, _ := m.selected()
 		msg := fmt.Sprintf("Kill %s (pid %d)?  y / n", dash(listen.SanitizeDisplay(e.Name)), e.PID)
-		b.WriteString(confirmBox.Render(msg) + "\n")
+		// The box adds a border and one cell of padding on each side.
+		b.WriteString(confirmBox.Render(truncate(msg, max(8, m.width-4))) + "\n")
 	case m.err != nil:
-		b.WriteString(errStyle.Render(m.err.Error()) + "\n")
+		b.WriteString(errStyle.Render(truncate(listen.SanitizeDisplay(m.err.Error()), m.width)) + "\n")
 	case m.status != "":
-		b.WriteString(okStyle.Render(m.status) + "\n")
+		b.WriteString(okStyle.Render(truncate(listen.SanitizeDisplay(m.status), m.width)) + "\n")
 	default:
 		b.WriteString("\n")
 	}
@@ -753,10 +770,12 @@ func (m model) formatRow(r viewRow, selected bool) string {
 		proj = "-"
 	}
 	maxName := max(8, m.width-colProcessX)
+	// Text columns are truncated and padded by display width: CJK characters
+	// take two cells, so %-21s / %-14s would shift every column after them.
 	name = truncate(name, maxName)
-	addr := truncate(listen.SanitizeDisplay(e.Addr), 21)
+	addr := padRight(truncate(listen.SanitizeDisplay(e.Addr), 21), 21)
 	proto := fmt.Sprintf("%-5s", e.Proto.String())
-	rest := fmt.Sprintf("  %5d  %-21s  %7s  %-14s  %s", e.Port, addr, pidCell(e.PID), truncate(proj, 14), name)
+	rest := fmt.Sprintf("  %5d  %s  %7s  %s  %s", e.Port, addr, pidCell(e.PID), padRight(truncate(proj, 14), 14), name)
 	mark := " " + r.markCell() + " "
 	if selected {
 		return selStyle.Render(padRight(mark+proto+rest, m.width))
@@ -786,18 +805,27 @@ func dash(s string) string {
 	return s
 }
 
+// truncate cuts s to at most n terminal cells, appending "…" (one cell) when
+// something was dropped. Width is measured in cells, not runes, so a full-width
+// string is never rendered wider than its column.
 func truncate(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
-	r := []rune(s)
-	if len(r) <= n {
+	if lipgloss.Width(s) <= n {
 		return s
 	}
-	if n <= 1 {
-		return string(r[:n])
+	var b strings.Builder
+	w := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if w+rw > n-1 {
+			break
+		}
+		b.WriteRune(r)
+		w += rw
 	}
-	return string(r[:n-1]) + "…"
+	return b.String() + "…"
 }
 
 func padRight(s string, n int) string {

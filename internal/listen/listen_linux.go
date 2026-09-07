@@ -246,7 +246,17 @@ func parseProcNet(path string, proto Proto, tcp, v6 bool) ([]sock, error) {
 	return out, sc.Err()
 }
 
+// parseHexAddr decodes an "ADDR:PORT" field from /proc/net/{tcp,udp}{,6}.
 func parseHexAddr(s string, v6 bool) (string, uint16, error) {
+	return parseHexAddrOrder(s, v6, binary.NativeEndian)
+}
+
+// parseHexAddrOrder decodes the address using host as the byte order the
+// kernel used to print each 32-bit word. /proc prints those words in host
+// byte order, so they need swapping to network order only on little-endian
+// hosts; on big-endian hosts (s390x, ppc64) they are already network order.
+// host is a parameter so both orders can be tested on either machine.
+func parseHexAddrOrder(s string, v6 bool, host binary.ByteOrder) (string, uint16, error) {
 	ipStr, portStr, ok := strings.Cut(s, ":")
 	if !ok {
 		return "", 0, fmt.Errorf("bad address %q", s)
@@ -264,15 +274,15 @@ func parseHexAddr(s string, v6 bool) (string, uint16, error) {
 		if len(raw) != 4 {
 			return "", 0, fmt.Errorf("bad ipv4 %q", ipStr)
 		}
-		ip = net.IP{raw[3], raw[2], raw[1], raw[0]}
+		ip = make(net.IP, 4)
 	} else {
 		if len(raw) != 16 {
 			return "", 0, fmt.Errorf("bad ipv6 %q", ipStr)
 		}
 		ip = make(net.IP, 16)
-		for i := 0; i < 16; i += 4 {
-			binary.LittleEndian.PutUint32(ip[i:i+4], binary.BigEndian.Uint32(raw[i:i+4]))
-		}
+	}
+	for i := 0; i < len(raw); i += 4 {
+		binary.BigEndian.PutUint32(ip[i:i+4], host.Uint32(raw[i:i+4]))
 	}
 	return normalizeAddr(ip.String()), uint16(port), nil
 }

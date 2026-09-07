@@ -14,8 +14,13 @@ import (
 
 func procStartToken(pid int) (uint64, error) {
 	var info C.struct_proc_bsdinfo
-	n := C.proc_pidinfo(C.int(pid), C.PROC_PIDTBSDINFO, 0, unsafe.Pointer(&info), C.int(C.sizeof_struct_proc_bsdinfo))
+	// errno matters here: proc_pidinfo returns 0 both for "no such process"
+	// and for real failures, and callers must tell them apart.
+	n, errno := C.proc_pidinfo(C.int(pid), C.PROC_PIDTBSDINFO, 0, unsafe.Pointer(&info), C.int(C.sizeof_struct_proc_bsdinfo))
 	if n < C.int(C.sizeof_struct_proc_bsdinfo) {
+		if errno != nil {
+			return 0, fmt.Errorf("proc_pidinfo bsdinfo: %w", errno)
+		}
 		return 0, fmt.Errorf("proc_pidinfo bsdinfo: %d", int(n))
 	}
 	usec := uint64(info.pbi_start_tvusec)

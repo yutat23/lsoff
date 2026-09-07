@@ -17,6 +17,10 @@ const (
 	tcpTableOwnerPIDListener = 3
 	udpTableOwnerPID         = 1
 	tcpStateListen           = 2
+
+	// tableFetchAttempts bounds retries when the table grows between the
+	// size query and the fetch.
+	tableFetchAttempts = 5
 )
 
 var (
@@ -353,10 +357,22 @@ func getExtendedTable[T any](proc *windows.LazyProc, family, tableClass uint32) 
 		}
 		return nil, fmt.Errorf("iphlpapi table size query failed: %d", r1)
 	}
-	buf := make([]byte, size)
-	r1, _, _ = proc.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0, uintptr(family), uintptr(tableClass), 0)
-	if r1 != 0 {
-		return nil, fmt.Errorf("iphlpapi table query failed: %d", r1)
+	// The table can grow between the size query and the fetch, in which case
+	// the fetch reports ERROR_INSUFFICIENT_BUFFER and writes the new size.
+	// Retry with the larger buffer instead of failing the whole listing.
+	var buf []byte
+	for attempt := 0; ; attempt++ {
+		if size == 0 {
+			return nil, nil
+		}
+		buf = make([]byte, size)
+		r1, _, _ = proc.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0, uintptr(family), uintptr(tableClass), 0)
+		if r1 == 0 {
+			break
+		}
+		if r1 != uintptr(windows.ERROR_INSUFFICIENT_BUFFER) || attempt >= tableFetchAttempts-1 {
+			return nil, fmt.Errorf("iphlpapi table query failed: %d", r1)
+		}
 	}
 	if len(buf) < 4 {
 		return nil, nil
@@ -365,7 +381,24 @@ func getExtendedTable[T any](proc *windows.LazyProc, family, tableClass uint32) 
 	if count == 0 {
 		return nil, nil
 	}
+	maxRows := maxTableRows[T](len(buf))
+	if uintptr(count) > maxRows {
+		// The driver reported more rows than the buffer can hold; use what fits.
+		count = uint32(maxRows)
+		if count == 0 {
+			return nil, nil
+		}
+	}
 	return unsafe.Slice((*T)(unsafe.Pointer(&buf[4])), int(count)), nil
+}
+
+// maxTableRows is how many T rows fit after the 4-byte dwNumEntries header.
+func maxTableRows[T any](bufLen int) uintptr {
+	if bufLen < 4 {
+		return 0
+	}
+	var zero T
+	return uintptr(bufLen-4) / unsafe.Sizeof(zero)
 }
 
 func portFromDWORD(v uint32) uint16 {

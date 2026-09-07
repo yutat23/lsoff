@@ -11,7 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"text/tabwriter"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // Proto is the transport protocol of a listening socket.
@@ -274,14 +275,24 @@ func ShortCwd(cwd string) string {
 	return cwd
 }
 
+// tableHeader is the column order of FormatTable.
+var tableHeader = []string{"PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS", "PATH", "CMD", "CWD"}
+
+// tableColumnGap is the number of spaces between two columns.
+const tableColumnGap = 2
+
 // FormatTable writes a stable, script-friendly table.
+//
+// Columns are padded by terminal display width (not rune count), so rows
+// containing full-width CJK text stay aligned. For ASCII-only input the
+// output is identical to text/tabwriter with padding 2.
 func FormatTable(w io.Writer, entries []Entry) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PROTO\tPORT\tADDRESS\tPID\tPROJECT\tPROCESS\tPATH\tCMD\tCWD")
+	rows := make([][]string, 0, len(entries)+1)
+	rows = append(rows, tableHeader)
 	for _, e := range entries {
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			e.Proto,
-			e.Port,
+		rows = append(rows, []string{
+			e.Proto.String(),
+			strconv.FormatUint(uint64(e.Port), 10),
 			displayCell(e.Addr),
 			pidString(e.PID),
 			displayCell(e.Project),
@@ -289,9 +300,44 @@ func FormatTable(w io.Writer, entries []Entry) error {
 			displayCell(e.Path),
 			displayCell(e.Cmdline),
 			displayCell(ShortCwd(e.Cwd)),
-		)
+		})
 	}
-	return tw.Flush()
+	_, err := io.WriteString(w, renderTable(rows))
+	return err
+}
+
+// renderTable pads every cell but the last on each line to the widest cell in
+// its column plus tableColumnGap. The last column is never padded, so no line
+// carries trailing spaces.
+func renderTable(rows [][]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	cols := len(rows[0])
+	widths := make([]int, cols)
+	cellW := make([][]int, len(rows))
+	for i, row := range rows {
+		cellW[i] = make([]int, len(row))
+		for j, cell := range row {
+			n := runewidth.StringWidth(cell)
+			cellW[i][j] = n
+			if j < cols-1 && n > widths[j] {
+				widths[j] = n
+			}
+		}
+	}
+	var b strings.Builder
+	for i, row := range rows {
+		for j, cell := range row {
+			b.WriteString(cell)
+			if j == len(row)-1 {
+				break
+			}
+			b.WriteString(strings.Repeat(" ", widths[j]+tableColumnGap-cellW[i][j]))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // FormatJSON writes entries as a JSON array. A nil slice becomes [].

@@ -111,7 +111,7 @@ No external commands (`lsof` / `ss` / `netstat`).
 | OS | API |
 |----|-----|
 | Linux | `/proc/net/{tcp,tcp6,udp,udp6}`, `/proc/<pid>/{fd,cmdline,cwd}` |
-| macOS | `libproc` (sockets and cwd) and `sysctl kern.procargs2` |
+| macOS | `sysctl net.inet.{tcp,udp}.pcblist64` (all listeners), `libproc` (owning process and cwd) and `sysctl kern.procargs2` |
 | Windows | IP Helper, `QueryFullProcessImageName`, `NtQueryInformationProcess` (cmdline and cwd) |
 
 Without permission, PID, path, and cmdline may be empty. Run as root / Administrator in that case.

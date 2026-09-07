@@ -1,7 +1,6 @@
 package listen
 
 import (
-	"errors"
 	"fmt"
 	"os"
 )
@@ -27,15 +26,4 @@ func requireIdent(id Ident) error {
 		return errNoIdentity
 	}
 	return nil
-}
-
-// KillAll terminates each process. Failures are joined; later PIDs are still attempted.
-func KillAll(ids []Ident) error {
-	var errs []error
-	for _, id := range ids {
-		if err := Kill(id); err != nil {
-			errs = append(errs, fmt.Errorf("pid %d: %w", id.PID, err))
-		}
-	}
-	return errors.Join(errs...)
 }

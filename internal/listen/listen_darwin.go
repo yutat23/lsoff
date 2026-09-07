@@ -15,7 +15,14 @@ import (
 	"unsafe"
 )
 
-// List returns LISTEN TCP sockets and bound UDP sockets via libproc.
+// List returns LISTEN TCP sockets and bound UDP sockets.
+//
+// libproc gives sockets plus the process that owns them, but only for
+// processes this user may inspect; sockets owned by root or another user are
+// invisible to it. So the libproc scan is topped up from the kernel PCB lists
+// (sysctl), which are readable by anyone: a socket no readable process claims
+// is reported with PID 0 and no process details, the same way the Linux
+// implementation reports a listener it cannot attribute.
 func List() ([]Entry, error) {
 	pids, err := listPIDs()
 	if err != nil {
@@ -33,6 +40,11 @@ func List() ([]Entry, error) {
 			seen[k] = struct{}{}
 			out = append(out, e)
 		}
+	}
+	// A sysctl failure only costs us the unattributed rows, so keep the
+	// libproc result rather than turning a working listing into an error.
+	if socks, err := listSockets(); err == nil {
+		out = mergeUnowned(out, socks)
 	}
 	Sort(out)
 	return out, nil

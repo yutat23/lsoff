@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strconv"
 
 	"github.com/yutat23/lsoff/internal/listen"
@@ -113,15 +114,27 @@ func flattenGroups(entries []listen.Entry, key listen.SortKey, desc bool, expand
 	return out
 }
 
+// sortGroups orders groups by their representative socket. It sorts the slice
+// itself rather than sorting representatives and rebuilding the slice from a
+// map keyed by Entry.Key(): two groups can share a key (PID 0 rows on the same
+// proto/addr/port), and keying by it made one group appear twice while the
+// other vanished.
 func sortGroups(groups []procBucket, key listen.SortKey, desc bool) {
-	reps := make([]listen.Entry, len(groups))
-	byKey := make(map[string]procBucket, len(groups))
-	for i, g := range groups {
-		reps[i] = g.sockets[0]
-		byKey[g.sockets[0].Key()] = g
+	sort.SliceStable(groups, func(i, j int) bool {
+		return repLess(groups[i].sockets[0], groups[j].sockets[0], key, desc)
+	})
+}
+
+// repLess reports whether a sorts strictly before b, deferring to
+// listen.SortBy so group order always matches the row order inside a group.
+// listen.SortBy is stable, so sorting the pair as [b, a] only puts a first when
+// a is strictly smaller; equal-comparing entries keep their input order and
+// repLess reports false, which keeps sort.SliceStable stable for ties.
+func repLess(a, b listen.Entry, key listen.SortKey, desc bool) bool {
+	if a == b {
+		return false
 	}
-	listen.SortBy(reps, key, desc)
-	for i, e := range reps {
-		groups[i] = byKey[e.Key()]
-	}
+	pair := []listen.Entry{b, a}
+	listen.SortBy(pair, key, desc)
+	return pair[0] == a
 }

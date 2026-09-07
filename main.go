@@ -19,6 +19,9 @@ var version = "0.1.4"
 // listAll is the socket source. Tests replace it with a fixture.
 var listAll = listen.List
 
+// killOne terminates one process. Tests replace it so no real process dies.
+var killOne = listen.Kill
+
 type config struct {
 	tcp     bool
 	udp     bool
@@ -126,11 +129,18 @@ func runKill(cfg config, entries []listen.Entry, in io.Reader, out, errw io.Writ
 			return &exitError{code: 1}
 		}
 	}
-	if err := listen.KillAll(ids); err != nil {
-		return err
-	}
+	failed := false
 	for _, id := range ids {
+		if err := killOne(id); err != nil {
+			fmt.Fprintf(errw, "pid %d: %v\n", id.PID, err)
+			failed = true
+			continue
+		}
 		fmt.Fprintf(errw, "killed pid %d\n", id.PID)
+	}
+	if failed {
+		// Each failure was already reported above.
+		return &exitError{code: 1}
 	}
 	return nil
 }
@@ -216,6 +226,10 @@ func parseArgs(args []string) (config, error) {
 	if len(positional) == 1 {
 		n, err := strconv.ParseUint(positional[0], 10, 16)
 		if err != nil {
+			if isDigits(positional[0]) {
+				// All digits but not a port: a typo, not a search term.
+				return cfg, fmt.Errorf("invalid port %q (must be 0-65535)", positional[0])
+			}
 			if cfg.query != "" {
 				return cfg, fmt.Errorf("too many search terms (use quotes: %q)", cfg.query+" "+positional[0])
 			}
@@ -235,6 +249,19 @@ func parseArgs(args []string) (config, error) {
 		return cfg, fmt.Errorf("-y can only be used with -k")
 	}
 	return cfg, nil
+}
+
+// isDigits reports whether s is one or more ASCII digits.
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func usage() string {

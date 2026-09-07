@@ -458,3 +458,171 @@ func TestTogglePIDFilter(t *testing.T) {
 		t.Fatalf("restored rows=%d, want 3", len(got.rows))
 	}
 }
+
+// TestViewFitsWidth pins the detail block to the terminal width: an over-long
+// PATH used to wrap and push the footer off screen.
+func TestViewFitsWidth(t *testing.T) {
+	const longPath = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/140.0.7339.80/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+	m.filter.Width = max(10, m.width-4)
+	m.all = []listen.Entry{{
+		Proto:   listen.TCP,
+		Port:    8080,
+		Addr:    "127.0.0.1",
+		PID:     900,
+		Name:    "Google Chrome Helper",
+		Path:    longPath,
+		Cmdline: strings.Repeat("x", 300),
+		Cwd:     "/" + strings.Repeat("y", 299),
+		Project: "lsoff",
+	}}
+	m.applyFilter()
+	m.status = strings.Repeat("s", 200)
+
+	if n := lipgloss.Width(longPath); n < 120 {
+		t.Fatalf("test path too short to be interesting: %d cells", n)
+	}
+	for i, line := range strings.Split(m.View(), "\n") {
+		if n := lipgloss.Width(line); n > m.width {
+			t.Fatalf("line %d is %d cells wide, want <= %d: %q", i, n, m.width, listen.SanitizeDisplay(line))
+		}
+	}
+
+	m.status = ""
+	m.err = fmt.Errorf("%s", strings.Repeat("e", 200))
+	for i, line := range strings.Split(m.View(), "\n") {
+		if n := lipgloss.Width(line); n > m.width {
+			t.Fatalf("error view line %d is %d cells wide, want <= %d", i, n, m.width)
+		}
+	}
+}
+
+// TestRowsAlignWithHeaderWide is TestRowsAlignWithHeader with full-width text:
+// CJK characters take two cells, so padding by rune count shifts every column
+// after PROJECT.
+func TestRowsAlignWithHeaderWide(t *testing.T) {
+	m := model{width: 120}
+	header := m.formatHeader()
+	e := listen.Entry{Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", PID: 900, Name: "メモ帳", Project: "日本語プロジェクト"}
+	for _, selected := range []bool{false, true} {
+		line := m.formatRow(viewRow{e: e}, selected)
+		// "日本語プロジェクト" is 18 cells, so the column shows a truncated
+		// prefix; its first characters must still start the PROJECT column.
+		for _, c := range []struct{ label, value string }{
+			{"PROJECT", "日本語"},
+			{"PROCESS", "メモ帳"},
+		} {
+			want := cellX(t, header, c.label)
+			if got := cellX(t, line, c.value); got != want {
+				t.Fatalf("selected=%v: %s starts at column %d, header %s at %d\nheader: %q\nrow:    %q",
+					selected, c.value, got, c.label, want, header, listen.SanitizeDisplay(line))
+			}
+		}
+	}
+}
+
+// TestWideProjectTruncatedToColumn checks that a full-width value wider than
+// its column is cut to the column width in cells, never spilling into PROCESS.
+func TestWideProjectTruncatedToColumn(t *testing.T) {
+	m := model{width: 120}
+	header := m.formatHeader()
+	e := listen.Entry{
+		Proto:   listen.TCP,
+		Port:    8080,
+		Addr:    "127.0.0.1",
+		PID:     900,
+		Name:    "node",
+		Project: strings.Repeat("日", 30),
+	}
+	line := listen.SanitizeDisplay(m.formatRow(viewRow{e: e}, false))
+	projX := cellX(t, header, "PROJECT")
+	procX := cellX(t, header, "PROCESS")
+	if got := cellX(t, line, "node"); got != procX {
+		t.Fatalf("PROCESS starts at %d, want %d: %q", got, procX, line)
+	}
+	// The rendered project cell, in cells, must fit the 14-cell column.
+	cell := line[len(truncateCells(line, projX)) : len(line)-len("  node")]
+	if n := lipgloss.Width(cell); n != 14 {
+		t.Fatalf("project cell is %d cells wide, want 14: %q", n, cell)
+	}
+}
+
+// truncateCells returns the prefix of s that is n cells wide.
+func truncateCells(s string, n int) string {
+	w := 0
+	for i, r := range s {
+		rw := lipgloss.Width(string(r))
+		if w+rw > n {
+			return s[:i]
+		}
+		w += rw
+	}
+	return s
+}
+
+func TestTruncateByDisplayWidth(t *testing.T) {
+	cases := []struct {
+		in string
+		n  int
+	}{
+		{strings.Repeat("日", 10), 14},
+		{strings.Repeat("日", 10), 5},
+		{strings.Repeat("日", 10), 1},
+		{"日a日a日", 4},
+		{"abcdef", 3},
+	}
+	for _, c := range cases {
+		got := truncate(c.in, c.n)
+		if n := lipgloss.Width(got); n > c.n {
+			t.Fatalf("truncate(%q, %d) = %q (%d cells), want <= %d", c.in, c.n, got, n, c.n)
+		}
+	}
+	if got := truncate("abc", 5); got != "abc" {
+		t.Fatalf("short strings must pass through: %q", got)
+	}
+}
+
+// TestAutoToggleDoesNotStackTickChains: on/off/on used to leave the first
+// chain alive as well, halving the refresh interval with every toggle.
+func TestAutoToggleDoesNotStackTickChains(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+
+	var mm tea.Model = m
+	press := func() {
+		next, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+		mm = next
+	}
+	press() // on: chain 1
+	first := mm.(model).autoGen
+	press() // off
+	press() // on: chain 2
+	got := mm.(model)
+	if !got.auto {
+		t.Fatal("auto should be on after three toggles")
+	}
+	if got.autoGen == first {
+		t.Fatalf("autoGen not bumped: %d", got.autoGen)
+	}
+
+	if _, cmd := got.Update(tickMsg{gen: first}); cmd != nil {
+		t.Fatal("a stale tick must not re-arm a second chain")
+	}
+	if _, cmd := got.Update(tickMsg{gen: got.autoGen}); cmd == nil {
+		t.Fatal("the current chain must keep ticking")
+	}
+}
+
+func TestTickIgnoredWhenAutoOff(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	if _, cmd := m.Update(tickMsg{gen: m.autoGen}); cmd != nil {
+		t.Fatal("tick with auto off should do nothing")
+	}
+}

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS: listeners owned by other users (root daemons such as `sshd`, `kdc`, `screensharingd`) were missing entirely when lsoff ran without root. All listening sockets are now enumerated with `sysctl net.inet.{tcp,udp}.pcblist64`, and rows whose process cannot be inspected are shown with `-` for PID / process, as on Linux.
+- macOS: killing a process that had already exited returned `proc_pidinfo bsdinfo: 0` instead of succeeding quietly, unlike Linux.
+- TUI: the PATH detail line was not truncated to the terminal width, so a long macOS app path wrapped and pushed the footer down.
+- TUI and CLI table: full-width characters (Japanese project or process names) shifted the columns to their right. Cells are now padded by display width.
+- TUI: toggling auto-refresh off and on again started an extra refresh loop each time, so the refresh interval kept shrinking.
+- TUI: two rows with an unknown PID on the same address and port (for example `SO_REUSEPORT` listeners on Linux without root) were shown as one row twice, hiding the other.
+- CLI: `lsoff 65536` and other numbers outside 0-65535 are rejected as an invalid port instead of being treated as a search query.
+- CLI: `-k` now reports each PID separately (`killed pid N` or `pid N: error`), so a failure on one PID no longer hides the ones that were killed.
+- Windows: the socket table is re-fetched if it grows between the size query and the read, instead of failing the whole listing.
+- Linux: `/proc/net` address decoding is now correct on big-endian hosts.
+
 ## [0.1.4] - 2026-08-25
 
 ### Added

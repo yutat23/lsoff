@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func TestFilterPort(t *testing.T) {
@@ -259,5 +261,61 @@ func TestSortByProject(t *testing.T) {
 	SortBy(in, SortProject, false)
 	if in[0].Project != "alpha" {
 		t.Fatalf("asc: %+v", in)
+	}
+}
+
+// The width-aware formatter must keep producing exactly what text/tabwriter
+// produced for ASCII-only input: every cell padded to the column max plus two,
+// and the last cell on a line never padded.
+func TestFormatTableASCIILayoutUnchanged(t *testing.T) {
+	in := []Entry{
+		{Proto: TCP, Port: 22, Addr: "0.0.0.0", PID: 1, Name: "sshd", Path: "/usr/sbin/sshd"},
+	}
+	var buf bytes.Buffer
+	if err := FormatTable(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	want := "PROTO  PORT  ADDRESS  PID  PROJECT  PROCESS  PATH            CMD  CWD\n" +
+		"tcp    22    0.0.0.0  1    -        sshd     /usr/sbin/sshd  -    -\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("table changed\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// Full-width characters take two terminal cells, so padding by rune count
+// would push every later column out of line.
+func TestFormatTableWideChars(t *testing.T) {
+	in := []Entry{
+		{Proto: TCP, Port: 8080, Addr: "127.0.0.1", PID: 5, Project: "日本語プロジェクト", Name: "node"},
+		{Proto: TCP, Port: 8081, Addr: "127.0.0.1", PID: 6, Project: "ascii", Name: "redis"},
+	}
+	var buf bytes.Buffer
+	if err := FormatTable(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want header + 2 rows:\n%s", buf.String())
+	}
+	// PROCESS is the column after PROJECT, so it is the first one a mis-measured
+	// PROJECT cell would shift.
+	col := func(line, cell string) int {
+		i := strings.Index(line, cell)
+		if i < 0 {
+			t.Fatalf("cell %q not in %q", cell, line)
+		}
+		return runewidth.StringWidth(line[:i])
+	}
+	want := col(lines[0], "PROCESS")
+	for i, cell := range []string{"node", "redis"} {
+		if got := col(lines[i+1], cell); got != want {
+			t.Fatalf("PROCESS cell %q starts at display column %d, header at %d:\n%s",
+				cell, got, want, buf.String())
+		}
+	}
+	for _, line := range lines {
+		if strings.HasSuffix(line, " ") {
+			t.Fatalf("trailing spaces: %q", line)
+		}
 	}
 }
