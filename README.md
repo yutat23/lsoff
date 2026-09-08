@@ -75,7 +75,8 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | Key / action | What it does |
 |------|------|
 | `/` / click `Search:` / `ctrl+f` | Search (port, PID, name, project, path, cmdline; spaces are AND) |
-| `↑` / `↓` / `j` / `k` / `ctrl+u` / `ctrl+d` / click / wheel | Move and select (works while searching too) |
+| `↑` / `↓` / `j` / `k` / click / wheel | Move and select (works while searching too) |
+| `ctrl+u` / `ctrl+d` | Move one page up / down (works while searching too) |
 | Click a header | Sort by that column (click again for descending) |
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
 | `p` | Hide rows with an unknown PID (toggle) |
@@ -83,7 +84,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `6` | Show IPv6 rows only (press again to clear) |
 | `y` | Copy the selected `addr:port` |
 | `a` | Auto-refresh every 2 seconds (toggle) |
-| `enter` / `space` / click `▸` | Expand or collapse sockets for the same PID |
+| `enter` / `space` / click `▸` | Expand or collapse sockets within a group |
 | `h` / `l` | Collapse / expand |
 | `esc` / `ctrl+c` | Clear the search |
 | `r` | Reload the list now |
@@ -93,6 +94,8 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 In the TUI, `tcp` is green and `udp` is amber. The selected row uses the highlight background instead. The CLI table stays uncolored so it stays script-friendly. Process names, command lines, and paths are sanitized for the terminal (control characters and ANSI/OSC sequences). JSON keeps the original strings.
 
 Multiple bindings for the same logical process or Docker container endpoint (same protocol and port, such as an IPv4 + IPv6 pair) start collapsed as one row with `▸` and a `+N` count. `enter` expands them into a small tree: the head shows `▾`, the last child is drawn with `└─`, and every child before it with `├─`. So a pair of sockets shows a single `└─` child, and three or more chain as `├─`, … , `└─`. Different ports and protocols remain separate groups; Docker groups use the container identity rather than a PID.
+
+The `4` and `6` filters are mutually exclusive. Press the other key to switch families, or press the same key again to show both.
 
 Known service names (http, postgres, redis, vite, …) are searchable and shown on the `SVC` footer line. Ambiguous ports such as 3000 are aliases-only and have no single display name. Historic ports (echo, chargen) are not included. JSON may include `"service"` when a display name exists.
 
@@ -124,6 +127,8 @@ discovery with published-port metadata from the local Docker Engine API over
 namespace socket. The current user must have permission to access that socket.
 If Docker is absent, the socket is unavailable, or access/API calls fail,
 normal host-process discovery continues unchanged.
+
+Docker rows show a container name such as `docker:grafana` in `PROCESS`. The TUI details show the container-side port and protocol, and the container ID. These rows have no PID, so `p` / `-p` hides them, and `x` / `-k` cannot stop containers.
 
 UDP has no LISTEN state, so sockets bound to a port with no remote peer are shown.
 

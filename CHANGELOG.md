@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-09
+
+### Added
+
+- Docker: supplement host listeners with published TCP/UDP ports from the local Docker Engine API over `/var/run/docker.sock`, showing container names in `PROCESS` and container endpoint details in the TUI.
+- TUI: filter IPv4 or IPv6 rows with `4` / `6`; press the same key again to clear the filter.
+- TUI: move one page up / down with `ctrl+u` / `ctrl+d`, including while searching.
+
+### Changed
+
+- TUI: group bindings by process or Docker container, protocol, and host port. IPv4/IPv6 bindings within a group can be expanded together; different ports and protocols remain separate groups.
+
 ### Fixed
 
 - macOS: listeners owned by other users (root daemons such as `sshd`, `kdc`, `screensharingd`) were missing entirely when lsoff ran without root. All listening sockets are now enumerated with `sysctl net.inet.{tcp,udp}.pcblist64`, and rows whose process cannot be inspected are shown with `-` for PID / process, as on Linux.
@@ -62,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release: list listening TCP/UDP ports on Windows, Linux, and macOS, with an interactive TUI and optional kill.
 
+[Unreleased]: https://github.com/yutat23/lsoff/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/yutat23/lsoff/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/yutat23/lsoff/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/yutat23/lsoff/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yutat23/lsoff/compare/v0.1.1...v0.1.2

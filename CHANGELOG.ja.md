@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-09
+
+### Added
+
+- Docker: `/var/run/docker.sock` 経由でローカルの Docker Engine API から TCP/UDP の公開ポート情報を取得し、ホストのリスナー一覧に追加。`PROCESS` にコンテナ名、TUI の詳細欄にコンテナ側のポート・プロトコルとコンテナ ID を表示する。
+- TUI: `4` / `6` で IPv4 または IPv6 の行だけ表示するフィルタを追加。同じキーをもう一度押すと解除する。
+- TUI: `ctrl+u` / `ctrl+d` で 1 ページ上 / 下へ移動できるようにした。検索中も利用できる。
+
+### Changed
+
+- TUI: プロセスまたは Docker コンテナ、プロトコル、ホスト側ポートを単位にグループ化するようにした。同じグループの IPv4/IPv6 の行はまとめて展開でき、ポートやプロトコルが異なるものは別グループになる。
+
 ### Fixed
 
 - macOS: root なしで実行すると、他ユーザー（`sshd` や `kdc`、`screensharingd` などの root デーモン）のリスナーが一覧から丸ごと消えていた。`sysctl net.inet.{tcp,udp}.pcblist64` で全リスニングソケットを列挙し、プロセスを覗けない行は Linux と同様に PID / PROCESS を `-` で表示するようにした。
@@ -61,6 +73,8 @@
 
 - 初回リリース。Windows / Linux / macOS で LISTEN 中の TCP/UDP ポートを一覧し、TUI と任意の kill を提供する。
 
+[Unreleased]: https://github.com/yutat23/lsoff/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/yutat23/lsoff/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/yutat23/lsoff/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/yutat23/lsoff/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yutat23/lsoff/compare/v0.1.1...v0.1.2

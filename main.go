@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-var version = "0.1.4"
+var version = "0.1.5"
 
 // listAll is the socket source. Tests replace it with a fixture.
 var listAll = listen.List
