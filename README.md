@@ -92,7 +92,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 
 In the TUI, `tcp` is green and `udp` is amber. The selected row uses the highlight background instead. The CLI table stays uncolored so it stays script-friendly. Process names, command lines, and paths are sanitized for the terminal (control characters and ANSI/OSC sequences). JSON keeps the original strings.
 
-Sockets that share a PID (typical IPv4 + IPv6) start collapsed as one row with `▸` and a `+N` count. `enter` expands them into a small tree: the head shows `▾`, the last child is drawn with `└─`, and every child before it with `├─`. So a pair of sockets shows a single `└─` child, and three or more chain as `├─`, … , `└─`.
+Multiple bindings for the same logical process or Docker container endpoint (same protocol and port, such as an IPv4 + IPv6 pair) start collapsed as one row with `▸` and a `+N` count. `enter` expands them into a small tree: the head shows `▾`, the last child is drawn with `└─`, and every child before it with `├─`. So a pair of sockets shows a single `└─` child, and three or more chain as `├─`, … , `└─`. Different ports and protocols remain separate groups; Docker groups use the container identity rather than a PID.
 
 Known service names (http, postgres, redis, vite, …) are searchable and shown on the `SVC` footer line. Ambiguous ports such as 3000 are aliases-only and have no single display name. Historic ports (echo, chargen) are not included. JSON may include `"service"` when a display name exists.
 

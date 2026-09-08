@@ -8,6 +8,10 @@ import (
 	"github.com/yutat23/lsoff/internal/listen"
 )
 
+func expandedFor(e listen.Entry) map[groupKey]bool {
+	return map[groupKey]bool{groupKeyForEntry(e, 0): true}
+}
+
 func TestFlattenGroupsCollapsesSamePID(t *testing.T) {
 	in := []listen.Entry{
 		{PID: 1, Proto: listen.TCP, Port: 80, Addr: "127.0.0.1", Name: "nginx"},
@@ -34,7 +38,7 @@ func TestFlattenGroupsCollapsesSamePID(t *testing.T) {
 		t.Fatalf("leaf: %+v", leaf)
 	}
 
-	rows = flattenGroups(in, listen.SortPort, false, map[int]bool{1: true})
+	rows = flattenGroups(in, listen.SortPort, false, expandedFor(in[0]))
 	if len(rows) != 3 {
 		t.Fatalf("expanded len=%d, want 3", len(rows))
 	}
@@ -72,23 +76,117 @@ func TestFlattenGroupsTreeConnectorsOrder(t *testing.T) {
 		{PID: 7, Proto: listen.TCP, Port: 3000, Addr: "::1", Name: "vite"},
 		{PID: 7, Proto: listen.TCP, Port: 3001, Addr: "0.0.0.0", Name: "vite"},
 	}
-	rows := flattenGroups(in, listen.SortPort, false, map[int]bool{7: true})
+	rows := flattenGroups(in, listen.SortPort, false, expandedFor(in[0]))
 	if len(rows) != 3 {
 		t.Fatalf("len=%d, want 3", len(rows))
 	}
-	wantMarks := []string{"▾", "├─", "└─"}
+	wantMarks := []string{"▾", "└─", " "}
 	for i, want := range wantMarks {
 		if got := rows[i].mark(); got != want {
 			t.Fatalf("row %d mark=%q, want %q", i, got, want)
 		}
 	}
-	if rows[2].fold != foldChild || !rows[2].last {
-		t.Fatalf("last row should be last child: %+v", rows[2])
+	if rows[1].fold != foldChild || !rows[1].last || rows[2].fold != foldNone {
+		t.Fatalf("pair child and different-port leaf are wrong: %+v", rows)
 	}
 	m := model{width: 100}
-	line := m.formatRow(rows[2], false)
+	line := m.formatRow(rows[1], false)
 	if !strings.HasPrefix(line, " └─ ") {
 		t.Fatalf("rendered last child line=%q", line)
+	}
+}
+
+func TestFlattenGroupsUsesOwnerProtocolAndPort(t *testing.T) {
+	in := []listen.Entry{
+		{PID: 7, Proto: listen.TCP, Port: 3000, Addr: "0.0.0.0"},
+		{PID: 7, Proto: listen.TCP, Port: 3000, Addr: "::"},
+		{PID: 7, Proto: listen.TCP, Port: 9090, Addr: "0.0.0.0"},
+		{PID: 7, Proto: listen.UDP, Port: 3000, Addr: "0.0.0.0"},
+		{PID: 8, Proto: listen.TCP, Port: 3000, Addr: "0.0.0.0"},
+	}
+	rows := flattenGroups(in, listen.SortPort, false, nil)
+	if len(rows) != 4 {
+		t.Fatalf("groups=%d, want 4: %+v", len(rows), rows)
+	}
+	if rows[0].fold != foldCollapsed || rows[0].hidden != 1 {
+		t.Fatalf("same PID/protocol/port should group: %+v", rows[0])
+	}
+	for _, r := range rows[1:] {
+		if r.fold != foldNone {
+			t.Fatalf("different port/protocol/owner grouped unexpectedly: %+v", r)
+		}
+	}
+}
+
+func TestFlattenGroupsDockerOwnerUsesContainerID(t *testing.T) {
+	in := []listen.Entry{
+		{Source: listen.SourceDocker, ContainerID: "abc", Proto: listen.TCP, Port: 3000, Addr: "0.0.0.0", Name: "docker:grafana"},
+		{Source: listen.SourceDocker, ContainerID: "abc", Proto: listen.TCP, Port: 3000, Addr: "::", Name: "docker:grafana"},
+		{Source: listen.SourceDocker, ContainerID: "abc", Proto: listen.TCP, Port: 9090, Addr: "0.0.0.0", Name: "docker:grafana"},
+		{Source: listen.SourceDocker, ContainerID: "abc", Proto: listen.UDP, Port: 3000, Addr: "0.0.0.0", Name: "docker:grafana"},
+		{Source: listen.SourceDocker, ContainerID: "def", Proto: listen.TCP, Port: 3000, Addr: "0.0.0.0", Name: "docker:grafana"},
+	}
+	rows := flattenGroups(in, listen.SortPort, false, nil)
+	if len(rows) != 4 {
+		t.Fatalf("groups=%d, want 4: %+v", len(rows), rows)
+	}
+	var grouped bool
+	for _, r := range rows {
+		if r.fold == foldCollapsed && r.hidden == 1 {
+			grouped = true
+		}
+	}
+	if !grouped {
+		t.Fatalf("same Docker container/protocol/port did not group: %+v", rows)
+	}
+}
+
+func TestDockerGroupFiltersAndExpansion(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Source: listen.SourceDocker, ContainerID: "abc", Name: "docker:grafana", Proto: listen.TCP, Port: 3000, Addr: "0.0.0.0"},
+		{Source: listen.SourceDocker, ContainerID: "abc", Name: "docker:grafana", Proto: listen.TCP, Port: 3000, Addr: "::"},
+	}
+	m.applyFilter()
+	if len(m.rows) != 1 || m.rows[0].fold != foldCollapsed || m.rows[0].hidden != 1 {
+		t.Fatalf("initial Docker group: %+v", m.rows)
+	}
+
+	press := func(key tea.KeyMsg) {
+		next, _ := m.Update(key)
+		m = next.(model)
+	}
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	if len(m.rows) != 1 || m.rows[0].fold != foldNone || m.rows[0].e.Addr != "0.0.0.0" {
+		t.Fatalf("IPv4 view should contain one non-expandable member: %+v", m.rows)
+	}
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	if len(m.rows) != 1 || m.rows[0].fold != foldNone || m.rows[0].e.Addr != "::" {
+		t.Fatalf("IPv6 view should contain one non-expandable member: %+v", m.rows)
+	}
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	if len(m.rows) != 1 || m.rows[0].fold != foldCollapsed || m.rows[0].hidden != 1 {
+		t.Fatalf("cleared family view should restore group count: %+v", m.rows)
+	}
+	press(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.rows) != 2 || m.rows[0].fold != foldExpanded || m.rows[1].fold != foldChild {
+		t.Fatalf("Docker group did not expand: %+v", m.rows)
+	}
+
+	m.loading = true
+	next, _ := m.Update(loadedMsg{gen: m.loadGen, entries: m.all})
+	m = next.(model)
+	if len(m.rows) != 2 || m.rows[0].fold != foldExpanded {
+		t.Fatalf("refresh lost Docker expansion state: %+v", m.rows)
+	}
+
+	m.filter.SetValue("grafana")
+	m.applyFilter()
+	if len(m.rows) != 2 || m.rows[0].e.Name != "docker:grafana" {
+		t.Fatalf("Docker group search failed: %+v", m.rows)
 	}
 }
 

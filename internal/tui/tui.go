@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -110,7 +109,7 @@ type model struct {
 	autoGen   int
 	sortKey   listen.SortKey
 	sortDesc  bool
-	expanded  map[int]bool
+	expanded  map[groupKey]bool
 }
 
 // Run starts the interactive TUI.
@@ -134,7 +133,7 @@ func newModel(tcp, udp, onlyPID bool, query string) model {
 		wantTCP:  tcp,
 		wantUDP:  udp,
 		onlyPID:  onlyPID,
-		expanded: make(map[int]bool),
+		expanded: make(map[groupKey]bool),
 	}
 	if query != "" {
 		m.filtering = true
@@ -525,25 +524,25 @@ func sortKeyAtX(x int) listen.SortKey {
 
 func (m *model) toggleFold() {
 	r, ok := m.selectedRow()
-	if !ok || r.e.PID <= 0 {
+	if !ok || !r.grouped {
 		return
 	}
 	if r.fold != foldCollapsed && r.fold != foldExpanded && r.fold != foldChild {
 		return
 	}
-	m.expanded[r.e.PID] = !m.expanded[r.e.PID]
+	m.expanded[r.group] = !m.expanded[r.group]
 	m.applyFilter()
 }
 
 func (m *model) setFold(open bool) {
 	r, ok := m.selectedRow()
-	if !ok || r.e.PID <= 0 {
+	if !ok || !r.grouped {
 		return
 	}
 	if r.fold == foldNone {
 		return
 	}
-	m.expanded[r.e.PID] = open
+	m.expanded[r.group] = open
 	m.applyFilter()
 }
 
@@ -551,9 +550,6 @@ func (m *model) applyFilter() {
 	keep := make([]string, 0, 3)
 	if r, ok := m.selectedRow(); ok {
 		keep = append(keep, r.id(), r.e.Key())
-		if r.e.PID > 0 {
-			keep = append(keep, "p/"+strconv.Itoa(r.e.PID))
-		}
 	}
 	entries := m.all
 	if m.onlyPID {

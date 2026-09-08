@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 
@@ -17,18 +18,20 @@ const (
 )
 
 type viewRow struct {
-	e      listen.Entry
-	fold   foldState
-	hidden int
-	last   bool
+	e       listen.Entry
+	group   groupKey
+	grouped bool
+	fold    foldState
+	hidden  int
+	last    bool
 }
 
 func (r viewRow) id() string {
 	if r.fold == foldChild {
 		return r.e.Key()
 	}
-	if r.e.PID > 0 && (r.fold == foldCollapsed || r.fold == foldExpanded) {
-		return "p/" + strconv.Itoa(r.e.PID)
+	if r.grouped {
+		return "g/" + r.group.String()
 	}
 	return r.e.Key()
 }
@@ -56,73 +59,101 @@ func (r viewRow) markCell() string {
 	return padRight(r.mark(), markWidth)
 }
 
-type procBucket struct {
-	pid     int
+type ownerKind uint8
+
+const (
+	ownerProcess ownerKind = iota
+	ownerDocker
+	ownerAnonymous
+)
+
+type logicalOwner struct {
+	kind ownerKind
+	id   string
+}
+
+type groupKey struct {
+	owner logicalOwner
+	proto listen.Proto
+	port  uint16
+}
+
+func (k groupKey) String() string {
+	return fmt.Sprintf("%d/%s/%s/%d", k.owner.kind, k.owner.id, k.proto, k.port)
+}
+
+type listenerGroup struct {
+	key     groupKey
 	sockets []listen.Entry
 }
 
-func flattenGroups(entries []listen.Entry, key listen.SortKey, desc bool, expanded map[int]bool) []viewRow {
+func flattenGroups(entries []listen.Entry, key listen.SortKey, desc bool, expanded map[groupKey]bool) []viewRow {
 	if len(entries) == 0 {
 		return nil
 	}
-	order := make([]int, 0)
-	byPID := make(map[int]*procBucket)
-	var zeros []listen.Entry
-	for _, e := range entries {
-		if e.PID <= 0 {
-			zeros = append(zeros, e)
-			continue
-		}
-		b, ok := byPID[e.PID]
+	order := make([]groupKey, 0)
+	byKey := make(map[groupKey]*listenerGroup)
+	for i, e := range entries {
+		group := groupKeyForEntry(e, i)
+		b, ok := byKey[group]
 		if !ok {
-			b = &procBucket{pid: e.PID}
-			byPID[e.PID] = b
-			order = append(order, e.PID)
+			b = &listenerGroup{key: group}
+			byKey[group] = b
+			order = append(order, group)
 		}
 		b.sockets = append(b.sockets, e)
 	}
 
-	groups := make([]procBucket, 0, len(order)+len(zeros))
-	for _, pid := range order {
-		b := byPID[pid]
+	groups := make([]listenerGroup, 0, len(order))
+	for _, groupID := range order {
+		b := byKey[groupID]
 		listen.SortBy(b.sockets, key, desc)
 		groups = append(groups, *b)
-	}
-	for _, e := range zeros {
-		groups = append(groups, procBucket{sockets: []listen.Entry{e}})
 	}
 	sortGroups(groups, key, desc)
 
 	out := make([]viewRow, 0, len(entries))
 	for _, g := range groups {
 		if len(g.sockets) == 1 {
-			out = append(out, viewRow{e: g.sockets[0], fold: foldNone})
+			out = append(out, viewRow{e: g.sockets[0], group: g.key, grouped: isGroupable(g.key), fold: foldNone})
 			continue
 		}
-		if expanded[g.pid] {
-			out = append(out, viewRow{e: g.sockets[0], fold: foldExpanded})
+		if expanded[g.key] {
+			out = append(out, viewRow{e: g.sockets[0], group: g.key, grouped: true, fold: foldExpanded})
 			for i, e := range g.sockets {
 				if i == 0 {
 					continue
 				}
-				out = append(out, viewRow{e: e, fold: foldChild, last: i == len(g.sockets)-1})
+				out = append(out, viewRow{e: e, group: g.key, grouped: true, fold: foldChild, last: i == len(g.sockets)-1})
 			}
 			continue
 		}
-		out = append(out, viewRow{e: g.sockets[0], fold: foldCollapsed, hidden: len(g.sockets) - 1})
+		out = append(out, viewRow{e: g.sockets[0], group: g.key, grouped: true, fold: foldCollapsed, hidden: len(g.sockets) - 1})
 	}
 	return out
 }
 
-// sortGroups orders groups by their representative socket. It sorts the slice
-// itself rather than sorting representatives and rebuilding the slice from a
-// map keyed by Entry.Key(): two groups can share a key (PID 0 rows on the same
-// proto/addr/port), and keying by it made one group appear twice while the
-// other vanished.
-func sortGroups(groups []procBucket, key listen.SortKey, desc bool) {
+// sortGroups orders logical groups by their representative socket. It sorts
+// the slice itself rather than rebuilding it from a map, so distinct owners
+// with otherwise similar entries remain distinct.
+func sortGroups(groups []listenerGroup, key listen.SortKey, desc bool) {
 	sort.SliceStable(groups, func(i, j int) bool {
 		return repLess(groups[i].sockets[0], groups[j].sockets[0], key, desc)
 	})
+}
+
+func groupKeyForEntry(e listen.Entry, index int) groupKey {
+	owner := logicalOwner{kind: ownerAnonymous, id: strconv.Itoa(index)}
+	if e.PID > 0 {
+		owner = logicalOwner{kind: ownerProcess, id: strconv.Itoa(e.PID)}
+	} else if e.Source == listen.SourceDocker && e.ContainerID != "" {
+		owner = logicalOwner{kind: ownerDocker, id: e.ContainerID}
+	}
+	return groupKey{owner: owner, proto: e.Proto, port: e.Port}
+}
+
+func isGroupable(key groupKey) bool {
+	return key.owner.kind != ownerAnonymous
 }
 
 // repLess reports whether a sorts strictly before b, deferring to
