@@ -414,6 +414,43 @@ func TestJKMovesCursor(t *testing.T) {
 	}
 }
 
+func TestCtrlDAndCtrlUPageTableAndSearch(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 20
+	m.loading = false
+	m.all = make([]listen.Entry, 20)
+	for i := range m.all {
+		m.all[i] = listen.Entry{Proto: listen.TCP, Port: uint16(i + 1), Name: "listener"}
+	}
+	m.applyFilter()
+	m.cursor = 0
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = next.(model)
+	if m.cursor != m.pageSize() {
+		t.Fatalf("ctrl+d cursor=%d, want %d", m.cursor, m.pageSize())
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	if m.cursor != 0 {
+		t.Fatalf("ctrl+u cursor=%d, want 0", m.cursor)
+	}
+
+	m.filtering = true
+	m.filter.Focus()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = next.(model)
+	if m.cursor != m.pageSize() {
+		t.Fatalf("search ctrl+d cursor=%d, want %d", m.cursor, m.pageSize())
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	if m.cursor != 0 {
+		t.Fatalf("search ctrl+u cursor=%d, want 0", m.cursor)
+	}
+}
+
 func TestShortcutBarAtBottom(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 120

@@ -75,7 +75,7 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | Key / action | What it does |
 |------|------|
 | `/` / click `Search:` / `ctrl+f` | Search (port, PID, name, project, path, cmdline; spaces are AND) |
-| `↑` / `↓` / `j` / `k` / click / wheel | Move and select (works while searching too) |
+| `↑` / `↓` / `j` / `k` / `ctrl+u` / `ctrl+d` / click / wheel | Move and select (works while searching too) |
 | Click a header | Sort by that column (click again for descending) |
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
 | `p` | Hide rows with an unknown PID (toggle) |

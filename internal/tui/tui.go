@@ -347,11 +347,11 @@ func (m model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clamp()
 		}
 		return m, nil
-	case "pgup":
+	case "pgup", "ctrl+u":
 		m.cursor -= m.pageSize()
 		m.clamp()
 		return m, nil
-	case "pgdown":
+	case "pgdown", "ctrl+d":
 		m.cursor += m.pageSize()
 		m.clamp()
 		return m, nil
@@ -467,10 +467,10 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 			m.clamp()
 		}
-	case "pgup":
+	case "pgup", "ctrl+u":
 		m.cursor -= m.pageSize()
 		m.clamp()
-	case "pgdown":
+	case "pgdown", "ctrl+d":
 		m.cursor += m.pageSize()
 		m.clamp()
 	case "home", "g":
