@@ -210,6 +210,33 @@ func TestEnterTogglesFold(t *testing.T) {
 	}
 }
 
+func TestCollapsingSelectedChildKeepsGroupSelected(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{PID: 1, Proto: listen.TCP, Port: 80, Addr: "127.0.0.1", Name: "nginx"},
+		{PID: 1, Proto: listen.TCP, Port: 80, Addr: "::1", Name: "nginx"},
+		{PID: 2, Proto: listen.TCP, Port: 81, Addr: "127.0.0.1", Name: "sshd"},
+	}
+	m.applyFilter()
+
+	// Expand the first group, select its child, then collapse it.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	m.cursor = 1
+	if m.rows[m.cursor].fold != foldChild {
+		t.Fatalf("selected row is not a child: %+v", m.rows)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if len(m.rows) != 2 || m.cursor != 0 || m.rows[m.cursor].e.PID != 1 || m.rows[m.cursor].fold != foldCollapsed {
+		t.Fatalf("collapse moved selection away from group: cursor=%d rows=%+v", m.cursor, m.rows)
+	}
+}
+
 // TestFlattenGroupsKeepsGroupsWithSameKey covers two PID-0 rows on the same
 // proto/addr/port: their representative Entry.Key() is identical, which used to
 // make one group render twice while the other disappeared.

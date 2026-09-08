@@ -48,6 +48,7 @@ func Discover() ([]Published, error) {
 		},
 	}
 	client := &http.Client{Transport: transport, Timeout: 750 * time.Millisecond}
+	defer transport.CloseIdleConnections()
 	return DiscoverWithClient(client, "http://docker")
 }
 

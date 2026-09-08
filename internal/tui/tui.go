@@ -550,6 +550,11 @@ func (m *model) applyFilter() {
 	keep := make([]string, 0, 3)
 	if r, ok := m.selectedRow(); ok {
 		keep = append(keep, r.id(), r.e.Key())
+		if r.grouped {
+			// A selected child disappears when its group is collapsed. Keep the
+			// group ID as a fallback so selection remains on the collapsed group.
+			keep = append(keep, "g/"+r.group.String())
+		}
 	}
 	entries := m.all
 	if m.onlyPID {
@@ -708,7 +713,7 @@ func (m model) View() string {
 		} else {
 			b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
 			b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
-			b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.ShortCwd(e.Cwd), detail))) + "\n")
+			b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.SanitizeDisplay(listen.ShortCwd(e.Cwd)), detail))) + "\n")
 		}
 	} else {
 		b.WriteString("\n\n\n\n")

@@ -163,6 +163,31 @@ func TestInitialQuery(t *testing.T) {
 	}
 }
 
+func TestViewSanitizesShortCwd(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{{
+		Proto: listen.TCP,
+		Port:  8080,
+		Addr:  "127.0.0.1",
+		PID:   1,
+		Name:  "server",
+		Cwd:   "/tmp/ok\x1b[31m-danger",
+	}}
+	m.applyFilter()
+
+	view := m.View()
+	plain := listen.SanitizeDisplay(view)
+	if strings.Contains(view, "\x1b[31m-danger") {
+		t.Fatalf("raw CWD escape reached view: %q", view)
+	}
+	if !strings.Contains(plain, "CWD   /tmp/ok-danger") {
+		t.Fatalf("sanitized CWD missing from view: %q", plain)
+	}
+}
+
 func TestIPFamilyFiltersToggleAndSwitch(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 100
