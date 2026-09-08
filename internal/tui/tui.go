@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -78,6 +79,15 @@ type tickMsg struct {
 	gen int
 }
 
+// IPFamilyFilter is the mutually exclusive address-family view filter.
+type IPFamilyFilter uint8
+
+const (
+	IPFamilyAll IPFamilyFilter = iota
+	IPFamilyV4
+	IPFamilyV6
+)
+
 type model struct {
 	all       []listen.Entry
 	rows      []viewRow
@@ -95,6 +105,7 @@ type model struct {
 	wantTCP   bool
 	wantUDP   bool
 	onlyPID   bool
+	ipFamily  IPFamilyFilter
 	auto      bool
 	autoGen   int
 	sortKey   listen.SortKey
@@ -400,6 +411,12 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.applyFilter()
 		return m, nil
+	case "4":
+		m.toggleIPFamily(IPFamilyV4)
+		return m, nil
+	case "6":
+		m.toggleIPFamily(IPFamilyV6)
+		return m, nil
 	case "y":
 		e, ok := m.selected()
 		if !ok {
@@ -464,6 +481,15 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clamp()
 	}
 	return m, nil
+}
+
+func (m *model) toggleIPFamily(family IPFamilyFilter) {
+	if m.ipFamily == family {
+		m.ipFamily = IPFamilyAll
+	} else {
+		m.ipFamily = family
+	}
+	m.applyFilter()
 }
 
 func (m *model) cycleSort() {
@@ -533,6 +559,15 @@ func (m *model) applyFilter() {
 	if m.onlyPID {
 		entries = listen.FilterHasPID(entries)
 	}
+	if m.ipFamily != IPFamilyAll {
+		familyEntries := make([]listen.Entry, 0, len(entries))
+		for _, e := range entries {
+			if addressFamily(e.Addr) == m.ipFamily {
+				familyEntries = append(familyEntries, e)
+			}
+		}
+		entries = familyEntries
+	}
 	filtered := listen.FilterQuery(entries, m.filter.Value())
 	m.rows = flattenGroups(filtered, m.sortKey, m.sortDesc, m.expanded)
 	for _, id := range keep {
@@ -551,6 +586,28 @@ func (m *model) applyFilter() {
 		m.cursor = 0
 	}
 	m.clamp()
+}
+
+func addressFamily(addr string) IPFamilyFilter {
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return IPFamilyAll
+	}
+	if ip.To4() != nil {
+		return IPFamilyV4
+	}
+	return IPFamilyV6
+}
+
+func ipFamilyLabel(family IPFamilyFilter) string {
+	switch family {
+	case IPFamilyV4:
+		return "  ipv4"
+	case IPFamilyV6:
+		return "  ipv6"
+	default:
+		return ""
+	}
 }
 
 func (m *model) clamp() {
@@ -614,7 +671,7 @@ func (m model) View() string {
 	if m.onlyPID {
 		flags += "  pid"
 	}
-	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s  %s%s", len(m.rows), len(m.all), flags, m.sortKey.String(), arrow))
+	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s%s  %s%s", len(m.rows), len(m.all), flags, ipFamilyLabel(m.ipFamily), m.sortKey.String(), arrow))
 	if m.auto {
 		meta += helpStyle.Render("  auto")
 	}
@@ -711,15 +768,16 @@ func renderShortcuts(width int) string {
 		{"s", "sort", shortcutKey},
 		{"x", "kill", shortcutDanger},
 		{"q", "quit", shortcutQuit},
+		{"4/6", "ip", shortcutKey},
 	}
 	variants := [][]shortcutItem{
 		all,
-		{all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[8], all[9]},
-		{all[0], all[1], all[2], all[3], all[4], all[5], all[8], all[9]},
-		{all[0], all[1], all[2], all[3], all[4], all[8], all[9]},
-		{all[0], all[1], all[2], all[3], all[8], all[9]},
-		{all[0], all[1], all[2], all[8], all[9]},
-		{all[0], all[1], all[8], all[9]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[3], all[4], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[3], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[8], all[9], all[10]},
+		{all[0], all[1], all[8], all[9], all[10]},
 		{all[0], all[8], all[9]},
 	}
 	line := joinShortcuts(variants[len(variants)-1])

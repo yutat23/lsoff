@@ -79,6 +79,8 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | Click a header | Sort by that column (click again for descending) |
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
 | `p` | Hide rows with an unknown PID (toggle) |
+| `4` | Show IPv4 rows only (press again to clear) |
+| `6` | Show IPv6 rows only (press again to clear) |
 | `y` | Copy the selected `addr:port` |
 | `a` | Auto-refresh every 2 seconds (toggle) |
 | `enter` / `space` / click `▸` | Expand or collapse sockets for the same PID |

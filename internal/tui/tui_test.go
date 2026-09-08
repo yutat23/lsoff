@@ -163,6 +163,77 @@ func TestInitialQuery(t *testing.T) {
 	}
 }
 
+func TestIPFamilyFiltersToggleAndSwitch(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Addr: "127.0.0.1", Port: 3000, Name: "v4-process", PID: 10},
+		{Proto: listen.TCP, Addr: "0.0.0.0", Port: 3001, Name: "v4-docker", Source: listen.SourceDocker},
+		{Proto: listen.TCP, Addr: "::1", Port: 3000, Name: "v6-process", PID: 11},
+		{Proto: listen.TCP, Addr: "::", Port: 3001, Name: "v6-docker", Source: listen.SourceDocker},
+	}
+	m.applyFilter()
+	if len(m.rows) != 4 {
+		t.Fatalf("all rows=%d, want 4", len(m.rows))
+	}
+
+	press := func(key string) model {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		m = next.(model)
+		return m
+	}
+	if got := press("4"); got.ipFamily != IPFamilyV4 || len(got.rows) != 2 {
+		t.Fatalf("IPv4 filter: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if !strings.Contains(m.View(), "ipv4") {
+		t.Fatal("active IPv4 filter is not visible")
+	}
+	if got := press("4"); got.ipFamily != IPFamilyAll || len(got.rows) != 4 {
+		t.Fatalf("IPv4 toggle off: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("6"); got.ipFamily != IPFamilyV6 || len(got.rows) != 2 {
+		t.Fatalf("IPv6 filter: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("4"); got.ipFamily != IPFamilyV4 || len(got.rows) != 2 {
+		t.Fatalf("direct IPv6 to IPv4 switch: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("6"); got.ipFamily != IPFamilyV6 || len(got.rows) != 2 {
+		t.Fatalf("direct IPv4 to IPv6 switch: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("6"); got.ipFamily != IPFamilyAll || len(got.rows) != 4 {
+		t.Fatalf("IPv6 toggle off: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+}
+
+func TestIPFamilyFilterComposesWithProtocolPIDAndSearch(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Addr: "0.0.0.0", Port: 3000, Name: "docker:web", Source: listen.SourceDocker},
+		{Proto: listen.TCP, Addr: "::", Port: 3000, Name: "docker:web", Source: listen.SourceDocker},
+		{Proto: listen.UDP, Addr: "0.0.0.0", Port: 3000, Name: "docker:web", Source: listen.SourceDocker},
+		{Proto: listen.TCP, Addr: "127.0.0.1", Port: 3000, Name: "other", PID: 12},
+	}
+	m.wantTCP = true
+	m.all = listen.FilterProto(m.all, m.wantTCP, false)
+	m.onlyPID = true
+	m.filter.SetValue("docker")
+	m.applyFilter()
+	if len(m.rows) != 0 {
+		t.Fatalf("PID filter should hide Docker rows, got %d", len(m.rows))
+	}
+	m.onlyPID = false
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	m = next.(model)
+	if m.ipFamily != IPFamilyV4 || len(m.rows) != 1 || m.rows[0].e.Addr != "0.0.0.0" {
+		t.Fatalf("combined Docker/search/protocol/family filter: family=%v rows=%+v", m.ipFamily, m.rows)
+	}
+}
+
 // cellX returns the display column where sub starts in line, ignoring styling.
 func cellX(t *testing.T, line, sub string) int {
 	t.Helper()
