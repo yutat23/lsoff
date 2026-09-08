@@ -70,8 +70,8 @@ type procInfo struct {
 	Start   uint64
 }
 
-// List returns LISTEN TCP sockets and bound UDP sockets via IP Helper.
-func List() ([]Entry, error) {
+// listPlatform returns LISTEN TCP sockets and bound UDP sockets via IP Helper.
+func listPlatform() ([]Entry, error) {
 	cache := make(map[uint32]procInfo)
 	var out []Entry
 

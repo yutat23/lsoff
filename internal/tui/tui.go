@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
+	"net"
 	"strings"
 	"time"
 
@@ -78,6 +78,15 @@ type tickMsg struct {
 	gen int
 }
 
+// IPFamilyFilter is the mutually exclusive address-family view filter.
+type IPFamilyFilter uint8
+
+const (
+	IPFamilyAll IPFamilyFilter = iota
+	IPFamilyV4
+	IPFamilyV6
+)
+
 type model struct {
 	all       []listen.Entry
 	rows      []viewRow
@@ -95,11 +104,12 @@ type model struct {
 	wantTCP   bool
 	wantUDP   bool
 	onlyPID   bool
+	ipFamily  IPFamilyFilter
 	auto      bool
 	autoGen   int
 	sortKey   listen.SortKey
 	sortDesc  bool
-	expanded  map[int]bool
+	expanded  map[groupKey]bool
 }
 
 // Run starts the interactive TUI.
@@ -123,7 +133,7 @@ func newModel(tcp, udp, onlyPID bool, query string) model {
 		wantTCP:  tcp,
 		wantUDP:  udp,
 		onlyPID:  onlyPID,
-		expanded: make(map[int]bool),
+		expanded: make(map[groupKey]bool),
 	}
 	if query != "" {
 		m.filtering = true
@@ -336,11 +346,11 @@ func (m model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clamp()
 		}
 		return m, nil
-	case "pgup":
+	case "pgup", "ctrl+u":
 		m.cursor -= m.pageSize()
 		m.clamp()
 		return m, nil
-	case "pgdown":
+	case "pgdown", "ctrl+d":
 		m.cursor += m.pageSize()
 		m.clamp()
 		return m, nil
@@ -400,6 +410,12 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.applyFilter()
 		return m, nil
+	case "4":
+		m.toggleIPFamily(IPFamilyV4)
+		return m, nil
+	case "6":
+		m.toggleIPFamily(IPFamilyV6)
+		return m, nil
 	case "y":
 		e, ok := m.selected()
 		if !ok {
@@ -450,10 +466,10 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 			m.clamp()
 		}
-	case "pgup":
+	case "pgup", "ctrl+u":
 		m.cursor -= m.pageSize()
 		m.clamp()
-	case "pgdown":
+	case "pgdown", "ctrl+d":
 		m.cursor += m.pageSize()
 		m.clamp()
 	case "home", "g":
@@ -464,6 +480,15 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clamp()
 	}
 	return m, nil
+}
+
+func (m *model) toggleIPFamily(family IPFamilyFilter) {
+	if m.ipFamily == family {
+		m.ipFamily = IPFamilyAll
+	} else {
+		m.ipFamily = family
+	}
+	m.applyFilter()
 }
 
 func (m *model) cycleSort() {
@@ -499,25 +524,25 @@ func sortKeyAtX(x int) listen.SortKey {
 
 func (m *model) toggleFold() {
 	r, ok := m.selectedRow()
-	if !ok || r.e.PID <= 0 {
+	if !ok || !r.grouped {
 		return
 	}
 	if r.fold != foldCollapsed && r.fold != foldExpanded && r.fold != foldChild {
 		return
 	}
-	m.expanded[r.e.PID] = !m.expanded[r.e.PID]
+	m.expanded[r.group] = !m.expanded[r.group]
 	m.applyFilter()
 }
 
 func (m *model) setFold(open bool) {
 	r, ok := m.selectedRow()
-	if !ok || r.e.PID <= 0 {
+	if !ok || !r.grouped {
 		return
 	}
 	if r.fold == foldNone {
 		return
 	}
-	m.expanded[r.e.PID] = open
+	m.expanded[r.group] = open
 	m.applyFilter()
 }
 
@@ -525,13 +550,24 @@ func (m *model) applyFilter() {
 	keep := make([]string, 0, 3)
 	if r, ok := m.selectedRow(); ok {
 		keep = append(keep, r.id(), r.e.Key())
-		if r.e.PID > 0 {
-			keep = append(keep, "p/"+strconv.Itoa(r.e.PID))
+		if r.grouped {
+			// A selected child disappears when its group is collapsed. Keep the
+			// group ID as a fallback so selection remains on the collapsed group.
+			keep = append(keep, "g/"+r.group.String())
 		}
 	}
 	entries := m.all
 	if m.onlyPID {
 		entries = listen.FilterHasPID(entries)
+	}
+	if m.ipFamily != IPFamilyAll {
+		familyEntries := make([]listen.Entry, 0, len(entries))
+		for _, e := range entries {
+			if addressFamily(e.Addr) == m.ipFamily {
+				familyEntries = append(familyEntries, e)
+			}
+		}
+		entries = familyEntries
 	}
 	filtered := listen.FilterQuery(entries, m.filter.Value())
 	m.rows = flattenGroups(filtered, m.sortKey, m.sortDesc, m.expanded)
@@ -551,6 +587,28 @@ func (m *model) applyFilter() {
 		m.cursor = 0
 	}
 	m.clamp()
+}
+
+func addressFamily(addr string) IPFamilyFilter {
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return IPFamilyAll
+	}
+	if ip.To4() != nil {
+		return IPFamilyV4
+	}
+	return IPFamilyV6
+}
+
+func ipFamilyLabel(family IPFamilyFilter) string {
+	switch family {
+	case IPFamilyV4:
+		return "  ipv4"
+	case IPFamilyV6:
+		return "  ipv6"
+	default:
+		return ""
+	}
 }
 
 func (m *model) clamp() {
@@ -614,7 +672,7 @@ func (m model) View() string {
 	if m.onlyPID {
 		flags += "  pid"
 	}
-	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s  %s%s", len(m.rows), len(m.all), flags, m.sortKey.String(), arrow))
+	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s%s  %s%s", len(m.rows), len(m.all), flags, ipFamilyLabel(m.ipFamily), m.sortKey.String(), arrow))
 	if m.auto {
 		meta += helpStyle.Render("  auto")
 	}
@@ -648,9 +706,15 @@ func (m model) View() string {
 		// terminal and pushes the footer off screen.
 		detail := max(8, m.width-6)
 		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
-		b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
-		b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
-		b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.SanitizeDisplay(listen.ShortCwd(e.Cwd)), detail))) + "\n")
+		if e.Source == listen.SourceDocker {
+			b.WriteString(pathStyle.Render("SRC   docker\n"))
+			b.WriteString(pathStyle.Render("PORT  " + fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol) + "\n"))
+			b.WriteString(pathStyle.Render("ID    "+dash(truncate(e.ContainerID, detail))) + "\n")
+		} else {
+			b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
+			b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
+			b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.SanitizeDisplay(listen.ShortCwd(e.Cwd)), detail))) + "\n")
+		}
 	} else {
 		b.WriteString("\n\n\n\n")
 	}
@@ -705,15 +769,16 @@ func renderShortcuts(width int) string {
 		{"s", "sort", shortcutKey},
 		{"x", "kill", shortcutDanger},
 		{"q", "quit", shortcutQuit},
+		{"4/6", "ip", shortcutKey},
 	}
 	variants := [][]shortcutItem{
 		all,
-		{all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[8], all[9]},
-		{all[0], all[1], all[2], all[3], all[4], all[5], all[8], all[9]},
-		{all[0], all[1], all[2], all[3], all[4], all[8], all[9]},
-		{all[0], all[1], all[2], all[3], all[8], all[9]},
-		{all[0], all[1], all[2], all[8], all[9]},
-		{all[0], all[1], all[8], all[9]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[3], all[4], all[5], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[3], all[4], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[3], all[8], all[9], all[10]},
+		{all[0], all[1], all[2], all[8], all[9], all[10]},
+		{all[0], all[1], all[8], all[9], all[10]},
 		{all[0], all[8], all[9]},
 	}
 	line := joinShortcuts(variants[len(variants)-1])

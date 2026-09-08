@@ -15,7 +15,7 @@ import (
 	"unsafe"
 )
 
-// List returns LISTEN TCP sockets and bound UDP sockets.
+// listPlatform returns LISTEN TCP sockets and bound UDP sockets.
 //
 // libproc gives sockets plus the process that owns them, but only for
 // processes this user may inspect; sockets owned by root or another user are
@@ -23,7 +23,7 @@ import (
 // (sysctl), which are readable by anyone: a socket no readable process claims
 // is reported with PID 0 and no process details, the same way the Linux
 // implementation reports a listener it cannot attribute.
-func List() ([]Entry, error) {
+func listPlatform() ([]Entry, error) {
 	pids, err := listPIDs()
 	if err != nil {
 		return nil, err
@@ -46,7 +46,6 @@ func List() ([]Entry, error) {
 	if socks, err := listSockets(); err == nil {
 		out = mergeUnowned(out, socks)
 	}
-	Sort(out)
 	return out, nil
 }
 

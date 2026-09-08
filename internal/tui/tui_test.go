@@ -163,6 +163,102 @@ func TestInitialQuery(t *testing.T) {
 	}
 }
 
+func TestViewSanitizesShortCwd(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{{
+		Proto: listen.TCP,
+		Port:  8080,
+		Addr:  "127.0.0.1",
+		PID:   1,
+		Name:  "server",
+		Cwd:   "/tmp/ok\x1b[31m-danger",
+	}}
+	m.applyFilter()
+
+	view := m.View()
+	plain := listen.SanitizeDisplay(view)
+	if strings.Contains(view, "\x1b[31m-danger") {
+		t.Fatalf("raw CWD escape reached view: %q", view)
+	}
+	if !strings.Contains(plain, "CWD   /tmp/ok-danger") {
+		t.Fatalf("sanitized CWD missing from view: %q", plain)
+	}
+}
+
+func TestIPFamilyFiltersToggleAndSwitch(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Addr: "127.0.0.1", Port: 3000, Name: "v4-process", PID: 10},
+		{Proto: listen.TCP, Addr: "0.0.0.0", Port: 3001, Name: "v4-docker", Source: listen.SourceDocker},
+		{Proto: listen.TCP, Addr: "::1", Port: 3000, Name: "v6-process", PID: 11},
+		{Proto: listen.TCP, Addr: "::", Port: 3001, Name: "v6-docker", Source: listen.SourceDocker},
+	}
+	m.applyFilter()
+	if len(m.rows) != 4 {
+		t.Fatalf("all rows=%d, want 4", len(m.rows))
+	}
+
+	press := func(key string) model {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		m = next.(model)
+		return m
+	}
+	if got := press("4"); got.ipFamily != IPFamilyV4 || len(got.rows) != 2 {
+		t.Fatalf("IPv4 filter: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if !strings.Contains(m.View(), "ipv4") {
+		t.Fatal("active IPv4 filter is not visible")
+	}
+	if got := press("4"); got.ipFamily != IPFamilyAll || len(got.rows) != 4 {
+		t.Fatalf("IPv4 toggle off: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("6"); got.ipFamily != IPFamilyV6 || len(got.rows) != 2 {
+		t.Fatalf("IPv6 filter: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("4"); got.ipFamily != IPFamilyV4 || len(got.rows) != 2 {
+		t.Fatalf("direct IPv6 to IPv4 switch: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("6"); got.ipFamily != IPFamilyV6 || len(got.rows) != 2 {
+		t.Fatalf("direct IPv4 to IPv6 switch: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+	if got := press("6"); got.ipFamily != IPFamilyAll || len(got.rows) != 4 {
+		t.Fatalf("IPv6 toggle off: family=%v rows=%d", got.ipFamily, len(got.rows))
+	}
+}
+
+func TestIPFamilyFilterComposesWithProtocolPIDAndSearch(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Addr: "0.0.0.0", Port: 3000, Name: "docker:web", Source: listen.SourceDocker},
+		{Proto: listen.TCP, Addr: "::", Port: 3000, Name: "docker:web", Source: listen.SourceDocker},
+		{Proto: listen.UDP, Addr: "0.0.0.0", Port: 3000, Name: "docker:web", Source: listen.SourceDocker},
+		{Proto: listen.TCP, Addr: "127.0.0.1", Port: 3000, Name: "other", PID: 12},
+	}
+	m.wantTCP = true
+	m.all = listen.FilterProto(m.all, m.wantTCP, false)
+	m.onlyPID = true
+	m.filter.SetValue("docker")
+	m.applyFilter()
+	if len(m.rows) != 0 {
+		t.Fatalf("PID filter should hide Docker rows, got %d", len(m.rows))
+	}
+	m.onlyPID = false
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	m = next.(model)
+	if m.ipFamily != IPFamilyV4 || len(m.rows) != 1 || m.rows[0].e.Addr != "0.0.0.0" {
+		t.Fatalf("combined Docker/search/protocol/family filter: family=%v rows=%+v", m.ipFamily, m.rows)
+	}
+}
+
 // cellX returns the display column where sub starts in line, ignoring styling.
 func cellX(t *testing.T, line, sub string) int {
 	t.Helper()
@@ -343,6 +439,43 @@ func TestJKMovesCursor(t *testing.T) {
 	}
 }
 
+func TestCtrlDAndCtrlUPageTableAndSearch(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 20
+	m.loading = false
+	m.all = make([]listen.Entry, 20)
+	for i := range m.all {
+		m.all[i] = listen.Entry{Proto: listen.TCP, Port: uint16(i + 1), Name: "listener"}
+	}
+	m.applyFilter()
+	m.cursor = 0
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = next.(model)
+	if m.cursor != m.pageSize() {
+		t.Fatalf("ctrl+d cursor=%d, want %d", m.cursor, m.pageSize())
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	if m.cursor != 0 {
+		t.Fatalf("ctrl+u cursor=%d, want 0", m.cursor)
+	}
+
+	m.filtering = true
+	m.filter.Focus()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = next.(model)
+	if m.cursor != m.pageSize() {
+		t.Fatalf("search ctrl+d cursor=%d, want %d", m.cursor, m.pageSize())
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	if m.cursor != 0 {
+		t.Fatalf("search ctrl+u cursor=%d, want 0", m.cursor)
+	}
+}
+
 func TestShortcutBarAtBottom(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 120
@@ -413,6 +546,26 @@ func TestXStartsKillConfirm(t *testing.T) {
 	got := next.(model)
 	if !got.confirm {
 		t.Fatal("expected confirm after x")
+	}
+}
+
+func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{{
+		Proto: listen.TCP, Port: 7000, Addr: "0.0.0.0", Name: "docker:web",
+		Source: listen.SourceDocker, ContainerID: "abcdef012345", ContainerPort: 4000,
+		ContainerProtocol: "tcp",
+	}}
+	m.applyFilter()
+	if len(m.rows) != 1 || !strings.Contains(m.View(), "docker:web") || !strings.Contains(m.View(), "4000/tcp") {
+		t.Fatalf("Docker entry did not render: %q", m.View())
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if next.(model).confirm {
+		t.Fatal("Docker entry opened process kill confirmation")
 	}
 }
 

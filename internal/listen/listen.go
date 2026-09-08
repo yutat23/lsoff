@@ -34,18 +34,42 @@ func (p Proto) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.String())
 }
 
-// Entry is a listening TCP/UDP socket and the process that owns it.
+// Source identifies the owner metadata source for an entry.
+type Source uint8
+
+const (
+	SourceProcess Source = iota
+	SourceDocker
+)
+
+func (s Source) String() string {
+	if s == SourceDocker {
+		return "docker"
+	}
+	return "process"
+}
+
+func (s Source) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+// Entry is a listening TCP/UDP endpoint and its ownership metadata. Docker
+// entries intentionally have no process identity.
 type Entry struct {
-	Proto   Proto  `json:"proto"`
-	Port    uint16 `json:"port"`
-	Addr    string `json:"addr"`
-	PID     int    `json:"pid"`
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Cmdline string `json:"cmdline"`
-	Cwd     string `json:"cwd"`
-	Project string `json:"project"`
-	Start   uint64 `json:"-"`
+	Proto             Proto  `json:"proto"`
+	Port              uint16 `json:"port"`
+	Addr              string `json:"addr"`
+	PID               int    `json:"pid"`
+	Name              string `json:"name"`
+	Path              string `json:"path"`
+	Cmdline           string `json:"cmdline"`
+	Cwd               string `json:"cwd"`
+	Project           string `json:"project"`
+	Start             uint64 `json:"-"`
+	Source            Source `json:"source,omitempty"`
+	ContainerID       string `json:"container_id,omitempty"`
+	ContainerPort     uint16 `json:"container_port,omitempty"`
+	ContainerProtocol string `json:"container_protocol,omitempty"`
 }
 
 // Key uniquely identifies a listener row.
