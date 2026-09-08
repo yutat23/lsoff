@@ -116,6 +116,13 @@ No external commands (`lsof` / `ss` / `netstat`).
 
 Without permission, PID, path, and cmdline may be empty. Run as root / Administrator in that case.
 
+Docker-published ports are supported as well. lsoff supplements kernel socket
+discovery with published-port metadata from the local Docker Engine API over
+`/var/run/docker.sock`; it does not imply that the container owns a host
+namespace socket. The current user must have permission to access that socket.
+If Docker is absent, the socket is unavailable, or access/API calls fail,
+normal host-process discovery continues unchanged.
+
 UDP has no LISTEN state, so sockets bound to a port with no remote peer are shown.
 
 ## License

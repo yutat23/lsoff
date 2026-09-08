@@ -416,6 +416,26 @@ func TestXStartsKillConfirm(t *testing.T) {
 	}
 }
 
+func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{{
+		Proto: listen.TCP, Port: 7000, Addr: "0.0.0.0", Name: "docker:web",
+		Source: listen.SourceDocker, ContainerID: "abcdef012345", ContainerPort: 4000,
+		ContainerProtocol: "tcp",
+	}}
+	m.applyFilter()
+	if len(m.rows) != 1 || !strings.Contains(m.View(), "docker:web") || !strings.Contains(m.View(), "4000/tcp") {
+		t.Fatalf("Docker entry did not render: %q", m.View())
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if next.(model).confirm {
+		t.Fatal("Docker entry opened process kill confirmation")
+	}
+}
+
 func TestTogglePIDFilter(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 80

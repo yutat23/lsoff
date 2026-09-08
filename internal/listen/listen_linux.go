@@ -30,8 +30,8 @@ type sock struct {
 	ino   string
 }
 
-// List returns LISTEN TCP sockets and bound (unconnected) UDP sockets.
-func List() ([]Entry, error) {
+// listPlatform returns LISTEN TCP sockets and bound (unconnected) UDP sockets.
+func listPlatform() ([]Entry, error) {
 	socks, err := loadSockets()
 	if err != nil {
 		return nil, err
@@ -84,7 +84,6 @@ func List() ([]Entry, error) {
 		}
 	}
 
-	Sort(entries)
 	return entries, nil
 }
 

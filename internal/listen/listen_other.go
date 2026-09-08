@@ -8,6 +8,6 @@ import (
 )
 
 // List is not implemented on this OS.
-func List() ([]Entry, error) {
+func listPlatform() ([]Entry, error) {
 	return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 }

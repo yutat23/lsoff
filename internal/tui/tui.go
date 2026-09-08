@@ -648,9 +648,15 @@ func (m model) View() string {
 		// terminal and pushes the footer off screen.
 		detail := max(8, m.width-6)
 		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
-		b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
-		b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
-		b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.SanitizeDisplay(listen.ShortCwd(e.Cwd)), detail))) + "\n")
+		if e.Source == listen.SourceDocker {
+			b.WriteString(pathStyle.Render("SRC   docker\n"))
+			b.WriteString(pathStyle.Render("PORT  " + fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol) + "\n"))
+			b.WriteString(pathStyle.Render("ID    "+dash(truncate(e.ContainerID, detail))) + "\n")
+		} else {
+			b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
+			b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
+			b.WriteString(pathStyle.Render("CWD   "+dash(truncate(listen.ShortCwd(e.Cwd), detail))) + "\n")
+		}
 	} else {
 		b.WriteString("\n\n\n\n")
 	}
