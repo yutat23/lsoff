@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Docker: the Engine socket is no longer fixed to `/var/run/docker.sock`. A `unix://` `DOCKER_HOST` is used on its own; otherwise `/var/run/docker.sock`, `$XDG_RUNTIME_DIR/docker.sock` (rootless Docker) and `~/.docker/run/docker.sock` (Docker Desktop) are tried in order within one 750 ms budget. Any other `DOCKER_HOST` (`tcp://`, `ssh://`, …) disables Docker discovery, since a remote engine's ports are not listeners on this host.
+
+### Fixed
+
+- macOS: an IPv6 wildcard listener that also accepts IPv4 (a dual-stack socket, such as `rapportd`) was shown with the address `0.0.0.0` instead of `::`. The TUI `6` filter hid it and `y` copied the wrong address. It is now shown as `::`, as `lsof` and Linux report it.
+- TUI: a list reload that finished while the kill confirmation was open could move the selection to another row, and `y` then killed that process instead of the one named when `x` was pressed. The confirmation now keeps the process it was opened for.
+- TUI: the `PORT` and `ID` detail lines of a Docker row were indented by 12 spaces instead of starting at the left edge like `SVC` and `SRC`.
+- Docker: pressing `x` on a Docker row in the TUI, or running `lsoff -k` on a port that only a container publishes, suggested `try as root`, which cannot help. Both now name the container and point at `docker stop`.
+- CLI: the TUI key list in `lsoff -h` had fallen behind the TUI. It now lists `4` / `6`, `ctrl+u` / `ctrl+d`, `ctrl+f`, `g` / `G` and the other keys it was missing; the README key tables gained the same aliases.
+- Linux: killing a process that had already exited between listing and the kill returned `no such process` instead of succeeding quietly as on macOS. A PID that now belongs to a different process is still refused.
+- TUI: `killed pid N` was replaced by the socket count as soon as the reload after the kill finished, so it was visible for only a moment. A finished reload no longer overwrites feedback about an action (`killed pid N`, `copied …`, `auto-refresh on`); the socket count still updates when it is what the status line shows.
+- TUI: with a full page of rows, the kill confirmation box made the view one line taller than the terminal, which pushed the title line off the top while it was open.
+- TUI: a long search query made the search line wider than the terminal (89 cells for an 80-character query in 80 columns), so it wrapped and shifted every row below it, including the rows that mouse clicks are mapped to.
+- TUI: a failed kill or copy was erased by the next successful reload, so with auto-refresh on the error vanished within 2 seconds. Such an error now stays until the next action reports its own result; a listing error is still cleared by the next successful reload.
+- TUI: the `PORT` and `ID` detail lines of a Docker row showed the container protocol and ID without the terminal sanitizing applied to `PATH`, `CMD` and `CWD`.
+- TUI: in a terminal narrower than about 74 columns the title line, the header and every row were wider than the terminal and wrapped, which shifted the lines below them and the rows that mouse clicks are mapped to; below 27 columns the shortcut bar wrapped onto extra lines. Lines are now cut at the terminal edge with `…`, from 12 columns up. Output at 74 columns and wider is unchanged.
+
 ## [0.1.5] - 2026-09-09
 
 ### Added

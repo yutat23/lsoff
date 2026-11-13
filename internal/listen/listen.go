@@ -139,23 +139,6 @@ func FilterHasPID(entries []Entry) []Entry {
 	return out
 }
 
-// UniquePIDs returns distinct positive PIDs in first-seen order.
-func UniquePIDs(entries []Entry) []int {
-	seen := make(map[int]struct{}, len(entries))
-	out := make([]int, 0, len(entries))
-	for _, e := range entries {
-		if e.PID <= 0 {
-			continue
-		}
-		if _, ok := seen[e.PID]; ok {
-			continue
-		}
-		seen[e.PID] = struct{}{}
-		out = append(out, e.PID)
-	}
-	return out
-}
-
 // FilterQuery returns entries matching all whitespace-separated terms
 // (case-insensitive) against proto, port, service aliases, address, pid, name, path, cmdline, cwd, and project.
 func FilterQuery(entries []Entry, q string) []Entry {

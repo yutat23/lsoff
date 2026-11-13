@@ -98,7 +98,6 @@ type model struct {
 	filtering bool
 	confirm   bool
 	status    string
-	err       error
 	loading   bool
 	loadGen   int
 	wantTCP   bool
@@ -110,6 +109,27 @@ type model struct {
 	sortKey   listen.SortKey
 	sortDesc  bool
 	expanded  map[groupKey]bool
+
+	// err is the failure of the last user action (a kill or a copy) and
+	// loadErr that of the last load. They are kept apart so a successful
+	// reload can clear its own earlier failure without erasing an action
+	// error the user has not read yet; that one stays until the next action
+	// that reports something (see setStatus) or r.
+	err     error
+	loadErr error
+
+	// countStatus is the socket-count message the last reload produced. A
+	// reload may replace the status only while it still shows its own output
+	// (or nothing, or the refresh placeholder), so it never erases feedback
+	// about a user action such as "killed pid N".
+	countStatus string
+
+	// confirmID and confirmName are the kill target captured when x opened the
+	// confirmation. A reload already in flight can land while the dialog is
+	// open and move the cursor onto a different process, so the box and y use
+	// this snapshot rather than whatever row is selected at that moment.
+	confirmID   listen.Ident
+	confirmName string
 }
 
 // Run starts the interactive TUI.
@@ -157,10 +177,22 @@ func (m model) loadCmd(gen int) tea.Cmd {
 	}
 }
 
+// refreshingStatus is the placeholder r shows until its reload lands.
+const refreshingStatus = "refreshing..."
+
 func (m model) beginLoad() (model, tea.Cmd) {
 	m.loadGen++
 	m.loading = true
 	return m, m.loadCmd(m.loadGen)
+}
+
+// setStatus reports the outcome of a user action. The new feedback replaces
+// an earlier action error: View shows an error in preference to the status,
+// so a stale kill or copy failure would otherwise hide it. Reloads never call
+// this, which is what lets an action error survive auto-refresh.
+func (m *model) setStatus(s string) {
+	m.err = nil
+	m.status = s
 }
 
 func (m model) autoTick() tea.Cmd {
@@ -171,9 +203,16 @@ func (m model) autoTick() tea.Cmd {
 	return tea.Tick(autoInterval, func(t time.Time) tea.Msg { return tickMsg{t: t, gen: gen} })
 }
 
+// killOne terminates one process. Tests replace it so no real process dies.
+var killOne = listen.Kill
+
+// writeClipboard copies text for y. Tests replace it so they never touch the
+// real clipboard.
+var writeClipboard = clipboard.WriteAll
+
 func killCmd(id listen.Ident) tea.Cmd {
 	return func() tea.Msg {
-		return killedMsg{pid: id.PID, err: listen.Kill(id)}
+		return killedMsg{pid: id.PID, err: killOne(id)}
 	}
 }
 
@@ -182,7 +221,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.filter.Width = max(10, msg.Width-4)
+		m.fitFilter()
 		m.clamp()
 		return m, nil
 
@@ -191,11 +230,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = false
-		m.err = msg.err
+		m.loadErr = msg.err
 		if msg.err == nil {
 			m.all = msg.entries
 			m.applyFilter()
-			m.status = fmt.Sprintf("%d listening sockets", len(m.all))
+			count := fmt.Sprintf("%d listening sockets", len(m.all))
+			if m.status == "" || m.status == refreshingStatus || m.status == m.countStatus {
+				m.status = count
+			}
+			m.countStatus = count
 		}
 		return m, nil
 
@@ -205,8 +248,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.err = nil
-		m.status = fmt.Sprintf("killed pid %d", msg.pid)
+		m.setStatus(fmt.Sprintf("killed pid %d", msg.pid))
 		return m.beginLoad()
 
 	case tickMsg:
@@ -286,6 +328,22 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// fitFilter sizes the search input to the terminal width. textinput renders
+// the prompt, Width cells of the query and one more cell for the cursor (past
+// the end, or overlapping the scrolled window), so Width is what is left after
+// the prompt and that cell. A wrapped search line would shift every row below
+// it off the fixed mouse Y offsets. Terminals narrower than the prompt plus
+// two cells cannot fit the line at all.
+func (m *model) fitFilter() {
+	m.filter.Width = max(1, m.width-lipgloss.Width(m.filter.Prompt)-1)
+	// textinput recomputes its scroll window only when the cursor moves, so a
+	// query set before the first resize (or a shrink) would keep its old,
+	// wider window. Jumping to the end and back rebuilds it for the new Width.
+	pos := m.filter.Position()
+	m.filter.CursorEnd()
+	m.filter.SetCursor(pos)
+}
+
 func (m model) rowIndexAt(y int) (int, bool) {
 	if y < viewRowsY || len(m.rows) == 0 {
 		return 0, false
@@ -303,23 +361,34 @@ func (m model) rowIndexAt(y int) (int, bool) {
 func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		e, ok := m.selected()
-		m.confirm = false
-		if !ok || e.PID <= 0 {
-			m.status = "no process to kill"
+		// Kill what the user confirmed, not the row under the cursor now: a
+		// reload during the dialog may have retargeted the cursor. If the
+		// confirmed process is already gone, listen.Kill reports that itself.
+		id := m.confirmID
+		m.closeConfirm()
+		if id.PID <= 0 {
+			m.setStatus("no process to kill")
 			return m, nil
 		}
-		if e.Start == 0 {
-			m.status = "process identity unknown (refusing to kill)"
+		if id.Start == 0 {
+			m.setStatus("process identity unknown (refusing to kill)")
 			return m, nil
 		}
-		return m, killCmd(e.Ident())
+		return m, killCmd(id)
 	case "n", "N", "esc", "q":
-		m.confirm = false
-		m.status = "cancelled"
+		m.closeConfirm()
+		m.setStatus("cancelled")
 		return m, nil
 	}
 	return m, nil
+}
+
+// closeConfirm closes the kill dialog and drops its captured target, so a
+// stale target can never leak into a later confirmation.
+func (m *model) closeConfirm() {
+	m.confirm = false
+	m.confirmID = listen.Ident{}
+	m.confirmName = ""
 }
 
 func (m model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -376,37 +445,39 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "r", "ctrl+r":
-		m.err = nil
-		m.status = "refreshing..."
+		// r is the explicit retry, so it also drops the last load's error;
+		// the reload it starts reports a fresh one if the listing still fails.
+		m.loadErr = nil
+		m.setStatus(refreshingStatus)
 		return m.beginLoad()
 	case "a":
 		m.auto = !m.auto
 		m.autoGen++
 		if m.auto {
-			m.status = "auto-refresh on"
+			m.setStatus("auto-refresh on")
 			if m.loading {
 				return m, m.autoTick()
 			}
 			m, cmd := m.beginLoad()
 			return m, tea.Batch(cmd, m.autoTick())
 		}
-		m.status = "auto-refresh off"
+		m.setStatus("auto-refresh off")
 		return m, nil
 	case "s":
 		m.cycleSort()
 		m.applyFilter()
-		m.status = "sort " + m.sortKey.String()
+		m.setStatus("sort " + m.sortKey.String())
 		return m, nil
 	case "S":
 		m.sortDesc = !m.sortDesc
 		m.applyFilter()
-		m.status = "sort " + m.sortKey.String()
+		m.setStatus("sort " + m.sortKey.String())
 	case "p", "P":
 		m.onlyPID = !m.onlyPID
 		if m.onlyPID {
-			m.status = "hiding rows with an unknown pid"
+			m.setStatus("hiding rows with an unknown pid")
 		} else {
-			m.status = "showing all listeners"
+			m.setStatus("showing all listeners")
 		}
 		m.applyFilter()
 		return m, nil
@@ -419,33 +490,40 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		e, ok := m.selected()
 		if !ok {
-			m.status = "nothing selected"
+			m.setStatus("nothing selected")
 			return m, nil
 		}
 		ep := listen.Endpoint(e)
-		if err := clipboard.WriteAll(ep); err != nil {
+		if err := writeClipboard(ep); err != nil {
 			m.status = ""
 			m.err = fmt.Errorf("copy: %w", err)
 			return m, nil
 		}
-		m.err = nil
-		m.status = "copied " + ep
+		m.setStatus("copied " + ep)
 		return m, nil
 	case "x":
 		e, ok := m.selected()
 		if !ok {
-			m.status = "nothing selected"
+			m.setStatus("nothing selected")
+			return m, nil
+		}
+		// A Docker row never has a PID, so root would not help; point at the
+		// tool that can stop it instead.
+		if e.Source == listen.SourceDocker {
+			m.setStatus("Docker container: lsoff cannot stop it (docker stop " + listen.SanitizeDisplay(listen.ContainerName(e)) + ")")
 			return m, nil
 		}
 		if e.PID <= 0 {
-			m.status = "pid unknown (try as root)"
+			m.setStatus("pid unknown (try as root)")
 			return m, nil
 		}
 		if e.Start == 0 {
-			m.status = "process identity unknown (refusing to kill)"
+			m.setStatus("process identity unknown (refusing to kill)")
 			return m, nil
 		}
 		m.confirm = true
+		m.confirmID = e.Ident()
+		m.confirmName = dash(listen.SanitizeDisplay(e.Name))
 		return m, nil
 	case "enter", " ":
 		m.toggleFold()
@@ -672,14 +750,14 @@ func (m model) View() string {
 	if m.onlyPID {
 		flags += "  pid"
 	}
-	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s%s  %s%s", len(m.rows), len(m.all), flags, ipFamilyLabel(m.ipFamily), m.sortKey.String(), arrow))
+	meta := []string{fmt.Sprintf("  %d/%d%s%s  %s%s", len(m.rows), len(m.all), flags, ipFamilyLabel(m.ipFamily), m.sortKey.String(), arrow)}
 	if m.auto {
-		meta += helpStyle.Render("  auto")
+		meta = append(meta, "  auto")
 	}
 	if m.loading {
-		meta += helpStyle.Render("  loading")
+		meta = append(meta, "  loading")
 	}
-	b.WriteString(title + meta + "\n")
+	b.WriteString(title + renderParts(meta, m.width-lipgloss.Width("lsoff"), helpStyle) + "\n")
 
 	b.WriteString(m.filter.View() + "\n")
 
@@ -688,14 +766,19 @@ func (m model) View() string {
 	ps := m.pageSize()
 	end := min(m.offset+ps, len(m.rows))
 	if len(m.rows) == 0 {
-		b.WriteString(helpStyle.Render("  no matching listeners") + "\n")
+		b.WriteString(helpStyle.Render(truncate("  no matching listeners", m.width)) + "\n")
 	} else {
 		for i := m.offset; i < end; i++ {
 			b.WriteString(m.formatRow(m.rows[i], i == m.cursor) + "\n")
 		}
 	}
 
-	b.WriteString("\n")
+	// The confirm box is three lines where the status line is one. A normal
+	// view is height-1 lines, so dropping this spacer while it is open makes
+	// the view exactly height lines without scrolling or shrinking the rows.
+	if !m.confirm {
+		b.WriteString("\n")
+	}
 	if e, ok := m.selected(); ok {
 		svc := listen.ServiceName(e.Proto, e.Port)
 		if svc == "" {
@@ -704,12 +787,15 @@ func (m model) View() string {
 		// Every detail line is prefixed with a 6-cell label, so its value gets
 		// width-6 cells. Without this a long macOS bundle path wraps in the
 		// terminal and pushes the footer off screen.
-		detail := max(8, m.width-6)
+		detail := max(1, m.width-6)
 		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
 		if e.Source == listen.SourceDocker {
-			b.WriteString(pathStyle.Render("SRC   docker\n"))
-			b.WriteString(pathStyle.Render("PORT  " + fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol) + "\n"))
-			b.WriteString(pathStyle.Render("ID    "+dash(truncate(e.ContainerID, detail))) + "\n")
+			// The container fields come from the Docker Engine API. Sanitize
+			// them here like the process fields rather than relying on
+			// internal/docker's validation to keep escapes off the terminal.
+			b.WriteString(pathStyle.Render("SRC   docker") + "\n")
+			b.WriteString(pathStyle.Render("PORT  "+truncate(listen.SanitizeDisplay(fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol)), detail)) + "\n")
+			b.WriteString(pathStyle.Render("ID    "+dash(truncate(listen.SanitizeDisplay(e.ContainerID), detail))) + "\n")
 		} else {
 			b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
 			b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
@@ -721,12 +807,17 @@ func (m model) View() string {
 
 	switch {
 	case m.confirm:
-		e, _ := m.selected()
-		msg := fmt.Sprintf("Kill %s (pid %d)?  y / n", dash(listen.SanitizeDisplay(e.Name)), e.PID)
+		// Render the captured target so the box always names exactly what y
+		// will kill, even if a reload has since moved the cursor.
+		msg := fmt.Sprintf("Kill %s (pid %d)?  y / n", m.confirmName, m.confirmID.PID)
 		// The box adds a border and one cell of padding on each side.
 		b.WriteString(confirmBox.Render(truncate(msg, max(8, m.width-4))) + "\n")
 	case m.err != nil:
+		// The action error comes first: it is what the user is waiting to
+		// read, and once their next action replaces it a failing load shows.
 		b.WriteString(errStyle.Render(truncate(listen.SanitizeDisplay(m.err.Error()), m.width)) + "\n")
+	case m.loadErr != nil:
+		b.WriteString(errStyle.Render(truncate(listen.SanitizeDisplay(m.loadErr.Error()), m.width)) + "\n")
 	case m.status != "":
 		b.WriteString(okStyle.Render(truncate(listen.SanitizeDisplay(m.status), m.width)) + "\n")
 	default:
@@ -780,6 +871,8 @@ func renderShortcuts(width int) string {
 		{all[0], all[1], all[2], all[8], all[9], all[10]},
 		{all[0], all[1], all[8], all[9], all[10]},
 		{all[0], all[8], all[9]},
+		{all[0], all[9]},
+		{all[9]},
 	}
 	line := joinShortcuts(variants[len(variants)-1])
 	for _, items := range variants {
@@ -792,7 +885,12 @@ func renderShortcuts(width int) string {
 
 	style := shortcutBar
 	if width > 0 {
-		style = style.Width(width).MaxWidth(width)
+		// Width pads the bar to the terminal but wraps a longer line onto
+		// extra lines, which would grow the view; MaxWidth alone cuts it.
+		if lipgloss.Width(" "+line) <= width {
+			style = style.Width(width)
+		}
+		style = style.MaxWidth(width)
 	}
 	return style.Render(" " + line)
 }
@@ -816,9 +914,12 @@ func protoLabel(tcp, udp bool) string {
 	}
 }
 
+// formatHeader and formatRow keep the column grid at every width, so header
+// clicks and the fold hit-test stay valid; a terminal too narrow for the grid
+// cuts the line at its edge instead of wrapping it onto the next row.
 func (m model) formatHeader() string {
-	return fmt.Sprintf("%s%-5s  %5s  %-21s  %7s  %-14s  %s",
-		strings.Repeat(" ", colProtoX), "PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS")
+	return truncate(fmt.Sprintf("%s%-5s  %5s  %-21s  %7s  %-14s  %s",
+		strings.Repeat(" ", colProtoX), "PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS"), m.width)
 }
 
 func (m model) formatRow(r viewRow, selected bool) string {
@@ -842,10 +943,18 @@ func (m model) formatRow(r viewRow, selected bool) string {
 	proto := fmt.Sprintf("%-5s", e.Proto.String())
 	rest := fmt.Sprintf("  %5d  %s  %7s  %s  %s", e.Port, addr, pidCell(e.PID), padRight(truncate(proj, 14), 14), name)
 	mark := " " + r.markCell() + " "
+	// Cut the plain line before styling it: cutting styled text by cells could
+	// split an escape sequence or drop the reset.
+	line := truncate(mark+proto+rest, m.width)
 	if selected {
-		return selStyle.Render(padRight(mark+proto+rest, m.width))
+		return selStyle.Render(padRight(line, m.width))
 	}
-	return mark + protoCell(e.Proto) + rest
+	after, ok := strings.CutPrefix(line, mark+proto)
+	if !ok {
+		// The cut went into PROTO itself; too narrow to color it.
+		return line
+	}
+	return mark + protoCell(e.Proto) + after
 }
 
 func protoCell(p listen.Proto) string {
@@ -868,6 +977,26 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// renderParts renders each part with style, cut together to at most width
+// cells. The cut is made on the plain text, so no escape sequence is split, and
+// the parts before it are rendered exactly as they would be uncut.
+func renderParts(parts []string, width int, style lipgloss.Style) string {
+	rest := truncate(strings.Join(parts, ""), width)
+	var b strings.Builder
+	for _, p := range parts {
+		if !strings.HasPrefix(rest, p) {
+			break
+		}
+		b.WriteString(style.Render(p))
+		rest = rest[len(p):]
+	}
+	if rest != "" {
+		// What is left is the part the cut went through, ending in "…".
+		b.WriteString(style.Render(rest))
+	}
+	return b.String()
 }
 
 // truncate cuts s to at most n terminal cells, appending "…" (one cell) when

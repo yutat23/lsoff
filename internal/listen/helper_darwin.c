@@ -17,13 +17,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void format_in_addr(const struct in_sockinfo *in, char *addr, int addrlen) {
-	memset(addr, 0, (size_t)addrlen);
-	if (in->insi_vflag & INI_IPV4) {
-		inet_ntop(AF_INET, &in->insi_laddr.ina_46.i46a_addr4, addr, (socklen_t)addrlen);
+/*
+ * format_pcb_addr renders a PCB's local address. A dual-stack AF_INET6 socket
+ * (no IPV6_V6ONLY, bound to ::) carries both the IPv4 and IPv6 version flags,
+ * but it is an IPv6 socket: lsof and Linux report it as ::. So only a PCB
+ * flagged IPv4 alone is rendered as IPv4. The libproc and sysctl paths both
+ * go through here because mergeUnowned matches their rows by address, and any
+ * disagreement would list the socket twice.
+ */
+static void format_pcb_addr(int is_v4, int is_v6, const struct in_addr *a4, const struct in6_addr *a6,
+		char *addr, size_t addrlen) {
+	memset(addr, 0, addrlen);
+	if (is_v4 && !is_v6) {
+		inet_ntop(AF_INET, a4, addr, (socklen_t)addrlen);
 		return;
 	}
-	inet_ntop(AF_INET6, &in->insi_laddr.ina_6, addr, (socklen_t)addrlen);
+	inet_ntop(AF_INET6, a6, addr, (socklen_t)addrlen);
+}
+
+static void format_in_addr(const struct in_sockinfo *in, char *addr, int addrlen) {
+	format_pcb_addr(in->insi_vflag & INI_IPV4, in->insi_vflag & INI_IPV6,
+		&in->insi_laddr.ina_46.i46a_addr4, &in->insi_laddr.ina_6, addr, (size_t)addrlen);
 }
 
 int lsoff_parse_listen(const struct socket_fdinfo *si, int *proto, int *port, char *addr, int addrlen) {
@@ -63,13 +77,9 @@ int lsoff_parse_listen(const struct socket_fdinfo *si, int *proto, int *port, ch
 }
 
 /* Same rendering as format_in_addr, for the xinpcb64 flavour of a PCB. */
-static void format_xinpcb_addr(const struct xinpcb64 *xi, char *addr, size_t addrlen) {
-	memset(addr, 0, addrlen);
-	if (xi->inp_vflag & INP_IPV4) {
-		inet_ntop(AF_INET, &xi->inp_dependladdr.inp46_local.ia46_addr4, addr, (socklen_t)addrlen);
-		return;
-	}
-	inet_ntop(AF_INET6, &xi->inp_dependladdr.inp6_local, addr, (socklen_t)addrlen);
+void lsoff_format_xinpcb_addr(const struct xinpcb64 *xi, char *addr, size_t addrlen) {
+	format_pcb_addr(xi->inp_vflag & INP_IPV4, xi->inp_vflag & INP_IPV6,
+		&xi->inp_dependladdr.inp46_local.ia46_addr4, &xi->inp_dependladdr.inp6_local, addr, addrlen);
 }
 
 /*
@@ -171,7 +181,7 @@ static int walk_pcblist(const char *buf, size_t len, int is_tcp, struct sock_sin
 		int lport = ntohs(xi->inp_lport);
 		if (listening && lport != 0) {
 			char addr[INET6_ADDRSTRLEN];
-			format_xinpcb_addr(xi, addr, sizeof(addr));
+			lsoff_format_xinpcb_addr(xi, addr, sizeof(addr));
 			if (!sink_push(sink, is_tcp ? IPPROTO_TCP : IPPROTO_UDP, lport, addr)) {
 				return -1;
 			}

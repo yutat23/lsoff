@@ -113,7 +113,7 @@ func runKill(cfg config, entries []listen.Entry, in io.Reader, out, errw io.Writ
 	}
 	ids := listen.UniqueIdents(entries)
 	if len(ids) == 0 {
-		return &exitError{code: 1, msg: "no process ids to kill (try as root)"}
+		return &exitError{code: 1, msg: noPIDsToKill(entries)}
 	}
 	pids := make([]int, len(ids))
 	for i, id := range ids {
@@ -143,6 +143,39 @@ func runKill(cfg config, entries []listen.Entry, in io.Reader, out, errw io.Writ
 		return &exitError{code: 1}
 	}
 	return nil
+}
+
+// noPIDsToKill explains why entries have nothing to kill. Docker rows never
+// have a PID, so for them "try as root" is the wrong hint: name the
+// containers and point at docker stop instead.
+func noPIDsToKill(entries []listen.Entry) string {
+	var names []string
+	seen := make(map[string]bool)
+	unknown := false
+	for _, e := range entries {
+		if e.Source != listen.SourceDocker {
+			unknown = true
+			continue
+		}
+		name := listen.SanitizeDisplay(listen.ContainerName(e))
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return "no process ids to kill (try as root)"
+	}
+	label := "container"
+	if len(names) != 1 {
+		label = "containers"
+	}
+	msg := fmt.Sprintf("no process ids to kill: published by Docker %s %s; lsoff cannot stop containers (use docker stop %s)",
+		label, strings.Join(names, ", "), strings.Join(names, " "))
+	if unknown {
+		msg += "; other listeners have an unknown pid (try as root)"
+	}
+	return msg
 }
 
 func confirmKill(in io.Reader, errw io.Writer, pids []int) (bool, error) {
@@ -286,17 +319,26 @@ Flags:
 
 TUI:
   / or click Search      filter as you type
+  ctrl+f                 same as /
+  enter while searching  keep the filter, return to the list
   ↑/↓ / j/k / wheel      move
+  ctrl+p / ctrl+n        move up / down
+  ctrl+u / ctrl+d        page up / down
+  pgup / pgdn            page up / down
+  g / G / home / end     first / last row
+  click a row            select it
   click header           sort by column
   p                      hide rows with an unknown PID
+  4 / 6                  IPv4 / IPv6 only (same key again shows both)
   y                      copy addr:port
   a                      auto-refresh every 2s
   s / S                  sort / reverse
-  enter / space          expand or collapse a process
-  h / l                  collapse / expand
+  enter / space          expand or collapse a group
+  click ▸                expand or collapse a group
+  h / l / ← / →          collapse / expand
   esc / ctrl+c           clear search
-  r                      reload now
+  r / ctrl+r             reload now
   x                      kill selected process (asks for confirmation)
-  q                      quit
+  q / ctrl+c             quit (outside search)
 `
 }

@@ -163,6 +163,63 @@ func TestInitialQuery(t *testing.T) {
 	}
 }
 
+// TestSearchLineFitsWidth: the search input was sized without the prompt
+// and the cursor cell, and a query set before the first resize kept its
+// unscrolled window, so a long query rendered wider than the terminal and
+// the wrap shifted every line below it off the mouse Y offsets.
+func TestSearchLineFitsWidth(t *testing.T) {
+	queries := map[string]string{
+		"ascii": strings.Repeat("q", 80),
+		"wide":  strings.Repeat("日", 80),
+	}
+	key := func(mm tea.Model, msg tea.Msg) tea.Model {
+		next, _ := mm.Update(msg)
+		return next
+	}
+	right := tea.KeyMsg{Type: tea.KeyRight}
+	home := tea.KeyMsg{Type: tea.KeyHome}
+	states := []struct {
+		name string
+		set  func(mm tea.Model, w int) tea.Model
+	}{
+		{"focused at end", func(mm tea.Model, w int) tea.Model { return mm }},
+		{"focused at start", func(mm tea.Model, w int) tea.Model { return key(mm, home) }},
+		{"unfocused", func(mm tea.Model, w int) tea.Model { return key(mm, tea.KeyMsg{Type: tea.KeyEnter}) }},
+		// Scroll with the cursor mid-query, then shrink the terminal.
+		{"shrunk mid-query", func(mm tea.Model, w int) tea.Model {
+			mm = key(mm, home)
+			for i := 0; i < 40; i++ {
+				mm = key(mm, right)
+			}
+			return key(mm, tea.WindowSizeMsg{Width: w, Height: 24})
+		}},
+	}
+	for _, w := range []int{80, 40, 20} {
+		for qname, q := range queries {
+			for _, st := range states {
+				var mm tea.Model = newModel(false, false, false, q)
+				start := w
+				if st.name == "shrunk mid-query" {
+					start = 300
+				}
+				mm = key(mm, tea.WindowSizeMsg{Width: start, Height: 24})
+				mm = st.set(mm, w)
+				line := strings.Split(mm.View(), "\n")[viewFilterY]
+				if n := lipgloss.Width(line); n > w {
+					t.Fatalf("width %d, %s query, %s: search line is %d cells: %q", w, qname, st.name, n, listen.SanitizeDisplay(line))
+				}
+			}
+		}
+		// The placeholder shown for an empty query must fit as well.
+		var mm tea.Model = newModel(false, false, false, "")
+		mm = key(mm, tea.WindowSizeMsg{Width: w, Height: 24})
+		line := strings.Split(mm.View(), "\n")[viewFilterY]
+		if n := lipgloss.Width(line); n > w {
+			t.Fatalf("width %d: placeholder line is %d cells: %q", w, n, listen.SanitizeDisplay(line))
+		}
+	}
+}
+
 func TestViewSanitizesShortCwd(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 100
@@ -404,6 +461,62 @@ func TestStaleLoadIgnored(t *testing.T) {
 	}
 }
 
+// TestReloadStatusRule: a completed reload shows the socket count only in
+// place of nothing, the "refreshing..." placeholder or an earlier count, so
+// the count stays current across reloads but never overwrites action feedback.
+func TestReloadStatusRule(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	entries := []listen.Entry{
+		{Proto: listen.TCP, Port: 80, Addr: "127.0.0.1", PID: 10, Name: "nginx"},
+		{Proto: listen.TCP, Port: 443, Addr: "127.0.0.1", PID: 10, Name: "nginx"},
+		{Proto: listen.UDP, Port: 53, Addr: "127.0.0.1", PID: 11, Name: "named"},
+	}
+	var mm tea.Model = m
+	load := func(n int) string {
+		t.Helper()
+		next, _ := mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries[:n]})
+		mm = next
+		return mm.(model).status
+	}
+	press := func(key string) string {
+		t.Helper()
+		next, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		mm = next
+		return mm.(model).status
+	}
+
+	if got := load(2); got != "2 listening sockets" {
+		t.Fatalf("initial load status=%q", got)
+	}
+	// Successive reloads (auto-refresh) keep the count current.
+	if got := load(3); got != "3 listening sockets" {
+		t.Fatalf("second load status=%q", got)
+	}
+	if got := press("r"); got != "refreshing..." {
+		t.Fatalf("r status=%q", got)
+	}
+	if got := load(1); got != "1 listening sockets" {
+		t.Fatalf("manual reload status=%q", got)
+	}
+	// Action feedback survives the reloads that follow it.
+	if got := press("a"); got != "auto-refresh on" {
+		t.Fatalf("a status=%q", got)
+	}
+	for i := 0; i < 2; i++ {
+		if got := load(2); got != "auto-refresh on" {
+			t.Fatalf("reload %d replaced action feedback: status=%q", i, got)
+		}
+	}
+	if got := press("r"); got != "refreshing..." {
+		t.Fatalf("r status=%q", got)
+	}
+	if got := load(3); got != "3 listening sockets" {
+		t.Fatalf("reload after action status=%q", got)
+	}
+}
+
 func TestFormatRowSanitizes(t *testing.T) {
 	m := model{width: 80}
 	e := listen.Entry{Proto: listen.TCP, Port: 80, Addr: "127.0.0.1", Name: "a\x1b[31mb", Project: "x"}
@@ -521,11 +634,19 @@ func TestRenderShortcutsStylesKeys(t *testing.T) {
 	}
 }
 
+// TestRenderShortcutsFitsWidth: below the shortest variant's width, lipgloss
+// Width used to wrap the bar onto a second line, which grew the view by a line.
 func TestRenderShortcutsFitsWidth(t *testing.T) {
-	for _, w := range []int{40, 60, 80, 120} {
+	for _, w := range []int{1, 5, minViewWidth, 16, 20, 26, 27, 30, 40, 60, 80, 120} {
 		got := renderShortcuts(w)
 		if n := lipgloss.Width(got); n > w {
 			t.Fatalf("width %d: rendered %d", w, n)
+		}
+		if strings.Contains(got, "\n") {
+			t.Fatalf("width %d: bar wrapped onto more lines: %q", w, got)
+		}
+		if w >= minViewWidth && !strings.Contains(got, "quit") {
+			t.Fatalf("width %d: bar lost quit: %q", w, got)
 		}
 		if n := lipgloss.Width(renderFooterRule(w)); n != w {
 			t.Fatalf("rule width %d: rendered %d", w, n)
@@ -549,6 +670,280 @@ func TestXStartsKillConfirm(t *testing.T) {
 	}
 }
 
+// stubKill replaces killOne for the test and records every identity it is
+// asked to kill, so no real process is ever signalled.
+func stubKill(t *testing.T) *[]listen.Ident {
+	t.Helper()
+	var got []listen.Ident
+	prev := killOne
+	killOne = func(id listen.Ident) error {
+		got = append(got, id)
+		return nil
+	}
+	t.Cleanup(func() { killOne = prev })
+	return &got
+}
+
+// TestKillConfirmSurvivesReload: a reload already in flight when x was pressed
+// used to land during the dialog, drop the confirmed row, leave the cursor on
+// the next process, and make both the box and y switch to that process.
+func TestKillConfirmSurvivesReload(t *testing.T) {
+	killed := stubKill(t)
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"},
+		{Proto: listen.TCP, Port: 8001, Addr: "127.0.0.1", PID: 101, Start: 1001, Name: "bravo"},
+		{Proto: listen.TCP, Port: 8002, Addr: "127.0.0.1", PID: 102, Start: 1002, Name: "charlie"},
+	}
+	m.applyFilter()
+	m.cursor = 0
+
+	// A reload is in flight before x is pressed.
+	m, _ = m.beginLoad()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = next.(model)
+	if !m.confirm {
+		t.Fatal("expected confirm after x")
+	}
+
+	// The reload lands while the dialog is open, without the confirmed process.
+	next, _ = m.Update(loadedMsg{gen: m.loadGen, entries: []listen.Entry{m.all[1], m.all[2]}})
+	m = next.(model)
+	if !m.confirm {
+		t.Fatal("reload closed the confirmation")
+	}
+	if e, ok := m.selected(); !ok || e.PID != 101 {
+		t.Fatalf("precondition: cursor should now be on pid 101, got %+v ok=%v", e, ok)
+	}
+
+	view := listen.SanitizeDisplay(m.View())
+	if !strings.Contains(view, "Kill alpha (pid 100)?") {
+		t.Fatalf("confirm box retargeted after reload: %q", view)
+	}
+	if strings.Contains(view, "Kill bravo") {
+		t.Fatalf("confirm box names the row under the cursor: %q", view)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = next.(model)
+	if m.confirm || m.confirmID != (listen.Ident{}) || m.confirmName != "" {
+		t.Fatalf("y did not clear the dialog: confirm=%v id=%+v name=%q", m.confirm, m.confirmID, m.confirmName)
+	}
+	if cmd == nil {
+		t.Fatal("y should return a kill command")
+	}
+	raw := cmd()
+	msg, ok := raw.(killedMsg)
+	if !ok {
+		t.Fatalf("kill command returned %T", raw)
+	}
+	want := listen.Ident{PID: 100, Start: 1000}
+	if len(*killed) != 1 || (*killed)[0] != want {
+		t.Fatalf("killed %+v, want exactly %+v", *killed, want)
+	}
+	if msg.pid != 100 {
+		t.Fatalf("killedMsg pid=%d, want 100", msg.pid)
+	}
+}
+
+// TestKillStatusSurvivesReload: the reload started after a successful kill
+// used to replace "killed pid N" with the socket count as soon as it landed,
+// so the confirmation was on screen for only a few milliseconds.
+func TestKillStatusSurvivesReload(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"},
+		{Proto: listen.TCP, Port: 8001, Addr: "127.0.0.1", PID: 101, Start: 1001, Name: "bravo"},
+	}
+	m.applyFilter()
+
+	next, cmd := m.Update(killedMsg{pid: 100})
+	m = next.(model)
+	if cmd == nil || !m.loading {
+		t.Fatal("a successful kill should start a reload")
+	}
+	next, _ = m.Update(loadedMsg{gen: m.loadGen, entries: []listen.Entry{m.all[1]}})
+	m = next.(model)
+	if len(m.all) != 1 || m.all[0].PID != 101 {
+		t.Fatalf("post-kill reload not applied: %+v", m.all)
+	}
+	if m.status != "killed pid 100" {
+		t.Fatalf("status=%q, want the kill to still be reported", m.status)
+	}
+	if view := listen.SanitizeDisplay(m.View()); !strings.Contains(view, "killed pid 100") {
+		t.Fatalf("kill feedback missing from view: %q", view)
+	}
+}
+
+// stubClipboard replaces writeClipboard for the test so y never touches the
+// real clipboard; it fails with err when err is non-nil.
+func stubClipboard(t *testing.T, err error) {
+	t.Helper()
+	prev := writeClipboard
+	writeClipboard = func(string) error { return err }
+	t.Cleanup(func() { writeClipboard = prev })
+}
+
+// TestActionErrorSurvivesReload: every completed reload used to set m.err to
+// its own (nil) error, so with auto-refresh a failed kill or copy vanished
+// within two seconds while success feedback stayed. An action error now stays
+// until the next action that reports something, or r.
+func TestActionErrorSurvivesReload(t *testing.T) {
+	entries := []listen.Entry{
+		{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"},
+		{Proto: listen.TCP, Port: 8001, Addr: "127.0.0.1", PID: 101, Start: 1001, Name: "bravo"},
+	}
+	cases := []struct {
+		name string
+		fail func(tea.Model) tea.Model
+		want string
+	}{
+		{"kill", func(mm tea.Model) tea.Model {
+			next, _ := mm.Update(killedMsg{pid: 100, err: fmt.Errorf("operation not permitted")})
+			return next
+		}, "operation not permitted"},
+		{"copy", func(mm tea.Model) tea.Model {
+			stubClipboard(t, fmt.Errorf("no clipboard utility"))
+			next, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+			return next
+		}, "copy: no clipboard utility"},
+	}
+	for _, c := range cases {
+		var mm tea.Model = newModel(false, false, false, "")
+		mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+		load := func() {
+			t.Helper()
+			mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries})
+		}
+		view := func() string { return listen.SanitizeDisplay(mm.(model).View()) }
+		load()
+		mm = c.fail(mm)
+		if !strings.Contains(view(), c.want) {
+			t.Fatalf("%s: error not shown: %q", c.name, view())
+		}
+		// Several reloads, as auto-refresh does every two seconds.
+		for i := 0; i < 3; i++ {
+			load()
+			if !strings.Contains(view(), c.want) {
+				t.Fatalf("%s: reload %d erased the action error: %q", c.name, i, view())
+			}
+		}
+		// The next action that reports something replaces the stale error.
+		mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+		if got := mm.(model); got.err != nil || got.status != "sort name" {
+			t.Fatalf("%s: s left err=%v status=%q", c.name, got.err, got.status)
+		}
+		if v := view(); strings.Contains(v, c.want) || !strings.Contains(v, "sort name") {
+			t.Fatalf("%s: s feedback hidden by the stale error: %q", c.name, v)
+		}
+
+		// r clears the error and reloads.
+		mm = c.fail(mm)
+		next, cmd := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+		mm = next
+		if got := mm.(model); cmd == nil || !got.loading || got.err != nil {
+			t.Fatalf("%s: r cmd=%v loading=%v err=%v", c.name, cmd != nil, got.loading, got.err)
+		}
+		if v := view(); strings.Contains(v, c.want) || !strings.Contains(v, refreshingStatus) {
+			t.Fatalf("%s: r did not replace the error: %q", c.name, v)
+		}
+	}
+
+	// A successful copy replaces an earlier copy error.
+	stubClipboard(t, nil)
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.all = entries
+	m.applyFilter()
+	m.err = fmt.Errorf("copy: no clipboard utility")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if got := next.(model); got.err != nil || got.status != "copied 127.0.0.1:8000" {
+		t.Fatalf("successful copy left err=%v status=%q", got.err, got.status)
+	}
+}
+
+// TestLoadErrorClearedByNextLoad: a failed reload reports its error, and the
+// next successful one clears it, so a transient listing failure under
+// auto-refresh heals itself. An action error outranks it on screen.
+func TestLoadErrorClearedByNextLoad(t *testing.T) {
+	entries := []listen.Entry{{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"}}
+	var mm tea.Model = newModel(false, false, false, "")
+	mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	load := func(err error) {
+		t.Helper()
+		mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries, err: err})
+	}
+	view := func() string { return listen.SanitizeDisplay(mm.(model).View()) }
+
+	load(nil)
+	load(fmt.Errorf("listing failed"))
+	if !strings.Contains(view(), "listing failed") {
+		t.Fatalf("load error not shown: %q", view())
+	}
+	load(nil)
+	if v := view(); strings.Contains(v, "listing failed") || !strings.Contains(v, "1 listening sockets") {
+		t.Fatalf("successful load did not clear the load error: %q", v)
+	}
+
+	// With both, the action error shows; once an action replaces it, the
+	// still-current load error is back, and the next good load clears it.
+	mm, _ = mm.Update(killedMsg{pid: 100, err: fmt.Errorf("operation not permitted")})
+	load(fmt.Errorf("listing failed"))
+	if v := view(); !strings.Contains(v, "operation not permitted") || strings.Contains(v, "listing failed") {
+		t.Fatalf("action error should outrank the load error: %q", v)
+	}
+	mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v := view(); !strings.Contains(v, "listing failed") {
+		t.Fatalf("load error lost after the action error was replaced: %q", v)
+	}
+	load(nil)
+	if v := view(); strings.Contains(v, "listing failed") || !strings.Contains(v, "sort name") {
+		t.Fatalf("good load after both errors: %q", v)
+	}
+}
+
+// TestKillConfirmCancelClearsTarget: closing the dialog must drop the captured
+// target so it cannot be reused by a later confirmation.
+func TestKillConfirmCancelClearsTarget(t *testing.T) {
+	killed := stubKill(t)
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("n")},
+		{Type: tea.KeyEsc},
+		{Type: tea.KeyRunes, Runes: []rune("q")},
+	} {
+		m := newModel(false, false, false, "")
+		m.width = 80
+		m.height = 24
+		m.loading = false
+		m.rows = []viewRow{
+			{e: listen.Entry{Proto: listen.TCP, Port: 80, PID: 12, Start: 1, Name: "nginx"}},
+		}
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+		m = next.(model)
+		if m.confirmID != (listen.Ident{PID: 12, Start: 1}) || m.confirmName != "nginx" {
+			t.Fatalf("x captured id=%+v name=%q", m.confirmID, m.confirmName)
+		}
+		next, cmd := m.Update(key)
+		m = next.(model)
+		if cmd != nil {
+			t.Fatalf("%s should not return a command", key)
+		}
+		if m.confirm || m.confirmID != (listen.Ident{}) || m.confirmName != "" {
+			t.Fatalf("%s left confirm=%v id=%+v name=%q", key, m.confirm, m.confirmID, m.confirmName)
+		}
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("cancel killed %+v", *killed)
+	}
+}
+
 func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 100
@@ -564,8 +959,114 @@ func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
 		t.Fatalf("Docker entry did not render: %q", m.View())
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	if next.(model).confirm {
+	got := next.(model)
+	if got.confirm {
 		t.Fatal("Docker entry opened process kill confirmation")
+	}
+	// Root cannot give a container a PID, so the hint must point at docker.
+	if want := "Docker container: lsoff cannot stop it (docker stop web)"; got.status != want {
+		t.Fatalf("status=%q, want %q", got.status, want)
+	}
+}
+
+// TestXOnUnknownPIDSuggestsRoot: a host process whose PID could not be read
+// usually needs more privileges, unlike a Docker row.
+func TestXOnUnknownPIDSuggestsRoot(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+	m.rows = []viewRow{
+		{e: listen.Entry{Proto: listen.TCP, Port: 22, Addr: "0.0.0.0"}},
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	got := next.(model)
+	if got.confirm || got.status != "pid unknown (try as root)" {
+		t.Fatalf("confirm=%v status=%q", got.confirm, got.status)
+	}
+}
+
+// TestDockerDetailLinesStartAtColumnZero: the SRC and PORT lines used to put
+// "\n" inside Render, so lipgloss padded the empty second line and the next
+// detail line (PORT, then ID) started after a run of spaces.
+func TestDockerDetailLinesStartAtColumnZero(t *testing.T) {
+	var mm tea.Model = newModel(false, false, false, "")
+	mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: []listen.Entry{{
+		Proto: listen.TCP, Port: 8080, Addr: "0.0.0.0", Name: "docker:web",
+		Source: listen.SourceDocker, ContainerID: "abcdef123456", ContainerPort: 80,
+		ContainerProtocol: "tcp",
+	}}})
+
+	// SanitizeDisplay also drops newlines, so split first and strip per line.
+	lines := strings.Split(mm.View(), "\n")
+	svc := -1
+	for i, line := range lines {
+		line = listen.SanitizeDisplay(line)
+		lines[i] = line
+		if strings.HasPrefix(line, "SVC   ") {
+			svc = i
+		}
+		if trimmed := strings.TrimLeft(line, " "); trimmed != line &&
+			(strings.HasPrefix(trimmed, "PORT  ") || strings.HasPrefix(trimmed, "ID    ")) {
+			t.Fatalf("line %d has leading padding before a detail label: %q", i, line)
+		}
+	}
+	if svc < 0 || svc+3 >= len(lines) {
+		t.Fatalf("SVC detail line missing or block truncated:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, want := range []string{"SRC   docker", "PORT  80/tcp", "ID    abcdef123456"} {
+		if got := strings.TrimRight(lines[svc+1+i], " "); got != want {
+			t.Fatalf("detail line %d = %q, want %q", svc+1+i, got, want)
+		}
+	}
+}
+
+// TestDockerDetailSanitized: the PORT and ID detail lines rendered the
+// container protocol and ID as Docker reported them, so an escape sequence
+// in either reached the terminal and a newline split the detail block.
+func TestDockerDetailSanitized(t *testing.T) {
+	render := func(id, proto string) string {
+		var mm tea.Model = newModel(false, false, false, "")
+		mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+		mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: []listen.Entry{{
+			Proto: listen.TCP, Port: 8080, Addr: "0.0.0.0", Name: "docker:web",
+			Source: listen.SourceDocker, ContainerID: id, ContainerPort: 80,
+			ContainerProtocol: proto,
+		}}})
+		return mm.View()
+	}
+	// SGR color, an OSC window title ended by BEL and by ST, and a raw newline.
+	view := render("\x1b[31mabc\x1b[0m\x1b]0;pwned-id\x07\nxyz", "t\x1b[31mc\x1b]2;pwned-proto\x1b\\p\nx")
+
+	// Assert on the raw view: stripping it with SanitizeDisplay would also
+	// strip the injected bytes and hide the bug.
+	for _, bad := range []string{"\x1b[31m", "\x1b]", "\x07", "\x1b\\", "pwned"} {
+		if strings.Contains(view, bad) {
+			t.Fatalf("injected %q reached the view: %q", bad, view)
+		}
+	}
+	// SanitizeDisplay turns the newline into a space, so the hostile values
+	// must render exactly like these clean ones, byte for byte.
+	if clean := render("abc xyz", "tcp x"); view != clean {
+		t.Fatalf("view differs from the one for the sanitized values\ngot:  %q\nwant: %q", view, clean)
+	}
+
+	lines := strings.Split(view, "\n")
+	svc := -1
+	for i := range lines {
+		lines[i] = listen.SanitizeDisplay(lines[i])
+		if strings.HasPrefix(lines[i], "SVC   ") {
+			svc = i
+		}
+	}
+	if svc < 0 || svc+4 >= len(lines) {
+		t.Fatalf("SVC detail line missing or block truncated:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, want := range []string{"SRC   docker", "PORT  80/tcp x", "ID    abc xyz", "1 listening sockets"} {
+		if got := strings.TrimRight(lines[svc+1+i], " "); got != want {
+			t.Fatalf("line %d after SVC = %q, want %q", 1+i, got, want)
+		}
 	}
 }
 
@@ -612,43 +1113,240 @@ func TestTogglePIDFilter(t *testing.T) {
 	}
 }
 
-// TestViewFitsWidth pins the detail block to the terminal width: an over-long
-// PATH used to wrap and push the footer off screen.
+// minViewWidth is the narrowest terminal every line of the view fits in. The
+// search line needs its prompt plus two cells (10), but the Docker detail line
+// "SRC   docker" is a fixed 12 cells.
+const minViewWidth = 12
+
+// TestViewFitsWidth: a line wider than the terminal wraps, which pushes the
+// footer off screen and shifts every line below it off the fixed mouse Y
+// offsets. An over-long PATH used to wrap, and below about 74 columns so did
+// the title line, the header, every row and the shortcut bar.
 func TestViewFitsWidth(t *testing.T) {
 	const longPath = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/140.0.7339.80/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"
-	m := newModel(false, false, false, "")
-	m.width = 80
-	m.height = 24
-	m.loading = false
-	m.filter.Width = max(10, m.width-4)
-	m.all = []listen.Entry{{
-		Proto:   listen.TCP,
-		Port:    8080,
-		Addr:    "127.0.0.1",
-		PID:     900,
-		Name:    "Google Chrome Helper",
-		Path:    longPath,
-		Cmdline: strings.Repeat("x", 300),
-		Cwd:     "/" + strings.Repeat("y", 299),
-		Project: "lsoff",
-	}}
-	m.applyFilter()
-	m.status = strings.Repeat("s", 200)
-
 	if n := lipgloss.Width(longPath); n < 120 {
 		t.Fatalf("test path too short to be interesting: %d cells", n)
 	}
-	for i, line := range strings.Split(m.View(), "\n") {
-		if n := lipgloss.Width(line); n > m.width {
-			t.Fatalf("line %d is %d cells wide, want <= %d: %q", i, n, m.width, listen.SanitizeDisplay(line))
+	chrome := func(addr string) listen.Entry {
+		return listen.Entry{
+			Proto: listen.TCP, Port: 3000, Addr: addr, PID: 900, Start: 1,
+			Name: "Google Chrome Helper (Renderer)", Path: longPath,
+			Cmdline: strings.Repeat("x", 300), Cwd: "/" + strings.Repeat("y", 299), Project: "lsoff",
 		}
 	}
+	entries := []listen.Entry{
+		{Proto: listen.TCP, Port: 22, Addr: "0.0.0.0", PID: 1, Start: 1, Name: "sshd", Path: "/usr/sbin/sshd"},
+		// One process on three addresses: a group with tree children.
+		chrome("127.0.0.1"), chrome("0.0.0.0"), chrome("192.168.100.200"),
+		{
+			Proto: listen.UDP, Port: 5353, Addr: "0.0.0.0", PID: 1200, Start: 1,
+			Name: strings.Repeat("メモ帳", 6), Project: "日本語プロジェクト",
+			Path: "/Applications/" + strings.Repeat("日本語", 20),
+		},
+		{
+			Proto: listen.TCP, Port: 8080, Addr: "0.0.0.0", Name: "docker:web",
+			Source: listen.SourceDocker, ContainerID: "abcdef012345", ContainerPort: 80, ContainerProtocol: "tcp",
+		},
+	}
+	for i := 0; i < 15; i++ {
+		entries = append(entries, listen.Entry{Proto: listen.TCP, Port: uint16(9000 + i), Addr: "127.0.0.1", PID: 2000 + i, Start: 1, Name: "listener"})
+	}
 
-	m.status = ""
-	m.err = fmt.Errorf("%s", strings.Repeat("e", 200))
-	for i, line := range strings.Split(m.View(), "\n") {
-		if n := lipgloss.Width(line); n > m.width {
-			t.Fatalf("error view line %d is %d cells wide, want <= %d", i, n, m.width)
+	key := func(mm tea.Model, msgs ...tea.Msg) tea.Model {
+		for _, msg := range msgs {
+			mm, _ = mm.Update(msg)
+		}
+		return mm
+	}
+	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	moveTo := func(mm tea.Model, port uint16) tea.Model {
+		for i := 0; i < len(entries); i++ {
+			if e, ok := mm.(model).selected(); ok && e.Port == port {
+				return mm
+			}
+			mm = key(mm, runes("j"))
+		}
+		t.Fatalf("precondition: port %d not reachable", port)
+		return mm
+	}
+	states := []struct {
+		name string
+		set  func(tea.Model) tea.Model
+	}{
+		{"normal", func(mm tea.Model) tea.Model { return mm }},
+		{"group selected", func(mm tea.Model) tea.Model { return moveTo(mm, 3000) }},
+		{"CJK row selected", func(mm tea.Model) tea.Model { return moveTo(mm, 5353) }},
+		{"last row selected", func(mm tea.Model) tea.Model { return key(mm, runes("G")) }},
+		{"docker selected", func(mm tea.Model) tea.Model { return moveTo(mm, 8080) }},
+		{"confirming", func(mm tea.Model) tea.Model { return key(moveTo(mm, 3000), runes("x")) }},
+		{"confirming CJK", func(mm tea.Model) tea.Model { return key(moveTo(mm, 5353), runes("x")) }},
+		{"error", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.err = fmt.Errorf("%s", strings.Repeat("権限がありません ", 20))
+			return m
+		}},
+		{"status", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.status = strings.Repeat("s", 200)
+			return m
+		}},
+		{"empty", func(mm tea.Model) tea.Model {
+			return key(mm, runes("/"), runes("zzz"), tea.KeyMsg{Type: tea.KeyEnter})
+		}},
+		{"searching long query", func(mm tea.Model) tea.Model {
+			return key(mm, runes("/"), runes(strings.Repeat("日本語listener", 6)))
+		}},
+		// -t, the pid and IPv4 filters, auto-refresh and a reload in flight.
+		{"all meta flags", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.wantTCP = true
+			return key(m, runes("p"), runes("4"), runes("a"))
+		}},
+		{"expanded group", func(mm tea.Model) tea.Model { return key(moveTo(mm, 3000), runes("l")) }},
+		{"last child selected", func(mm tea.Model) tea.Model {
+			return key(moveTo(mm, 3000), runes("l"), runes("j"), runes("j"))
+		}},
+	}
+	render := func(w int, set func(tea.Model) tea.Model) (model, []string) {
+		var mm tea.Model = newModel(false, false, false, "")
+		// Size the model the way the program does, so the search input is
+		// fitted by fitFilter.
+		mm = key(mm, tea.WindowSizeMsg{Width: w, Height: 24})
+		mm = key(mm, loadedMsg{gen: mm.(model).loadGen, entries: entries})
+		m := set(mm).(model)
+		return m, strings.Split(m.View(), "\n")
+	}
+
+	for _, st := range states {
+		m, wide := render(200, st.set)
+		switch st.name {
+		case "confirming", "confirming CJK":
+			if !m.confirm {
+				t.Fatalf("%s: precondition: confirmation not open", st.name)
+			}
+		case "all meta flags":
+			if !m.wantTCP || !m.onlyPID || m.ipFamily != IPFamilyV4 || !m.auto || !m.loading {
+				t.Fatalf("%s: precondition: flags not all set", st.name)
+			}
+		case "last child selected":
+			if r, ok := m.selectedRow(); !ok || r.fold != foldChild || !r.last {
+				t.Fatalf("%s: precondition: last child not selected: %+v", st.name, r)
+			}
+		}
+		for w := minViewWidth; w <= 120; w++ {
+			_, lines := render(w, st.set)
+			// A wrap inside the view (lipgloss wrapping a line it was told
+			// to pad) would add lines; compare with a comfortable width.
+			if len(lines) != len(wide) {
+				t.Errorf("width %d, %s: view is %d lines, want %d as at width 200", w, st.name, len(lines), len(wide))
+				continue
+			}
+			for i, line := range lines {
+				if n := lipgloss.Width(line); n > w {
+					t.Errorf("width %d, %s: line %d is %d cells wide: %q", w, st.name, i, n, listen.SanitizeDisplay(line))
+					break
+				}
+			}
+		}
+	}
+}
+
+// minViewHeight is the smallest terminal the fixed chrome (title, search,
+// header, detail block, status or confirm box, footer) fits in with one row.
+const minViewHeight = 13
+
+// TestViewFitsHeight: the kill confirmation box is three lines where the
+// status line is one, so with a full page of rows the view used to be one
+// line taller than the terminal and Bubble Tea dropped the title line.
+func TestViewFitsHeight(t *testing.T) {
+	entries := make([]listen.Entry, 60)
+	for i := range entries {
+		entries[i] = listen.Entry{Proto: listen.TCP, Port: uint16(1000 + i), Addr: "127.0.0.1", PID: 100 + i, Start: 1, Name: "listener"}
+	}
+	entries[59] = listen.Entry{
+		Proto: listen.TCP, Port: 1059, Addr: "0.0.0.0", Name: "docker:web",
+		Source: listen.SourceDocker, ContainerID: "abcdef012345", ContainerPort: 80, ContainerProtocol: "tcp",
+	}
+	key := func(mm tea.Model, k tea.KeyMsg) tea.Model {
+		next, _ := mm.Update(k)
+		return next
+	}
+	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	states := []struct {
+		name string
+		set  func(tea.Model) tea.Model
+	}{
+		{"normal", func(mm tea.Model) tea.Model { return mm }},
+		// Select the last row of the first page so the box must not hide it
+		// (stopping short of the Docker row, which x refuses).
+		{"confirming", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			for i := 1; i < min(m.pageSize(), len(m.rows)-1); i++ {
+				mm = key(mm, runes("j"))
+			}
+			return key(mm, runes("x"))
+		}},
+		{"confirming at end", func(mm tea.Model) tea.Model {
+			mm = key(mm, runes("G"))
+			mm = key(mm, runes("k"))
+			return key(mm, runes("x"))
+		}},
+		{"error", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.err = fmt.Errorf("permission denied")
+			return m
+		}},
+		{"docker selected", func(mm tea.Model) tea.Model { return key(mm, runes("G")) }},
+		{"empty", func(mm tea.Model) tea.Model {
+			mm = key(mm, runes("/"))
+			mm = key(mm, runes("zzz"))
+			return key(mm, tea.KeyMsg{Type: tea.KeyEnter})
+		}},
+		{"searching", func(mm tea.Model) tea.Model {
+			mm = key(mm, runes("/"))
+			return key(mm, runes("listener"))
+		}},
+	}
+	for _, h := range []int{minViewHeight, minViewHeight + 1, 16, 20, 24, 30, 40, 50, 80} {
+		for _, st := range states {
+			var mm tea.Model = newModel(false, false, false, "")
+			mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: h})
+			mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries})
+			mm = st.set(mm)
+			m := mm.(model)
+			if st.name == "confirming" || st.name == "confirming at end" {
+				if !m.confirm {
+					t.Fatalf("h=%d %s: precondition: confirmation not open", h, st.name)
+				}
+			}
+
+			lines := strings.Split(m.View(), "\n")
+			for i := range lines {
+				lines[i] = listen.SanitizeDisplay(lines[i])
+			}
+			if len(lines) > h {
+				t.Fatalf("h=%d %s: view is %d lines, want <= %d:\n%s", h, st.name, len(lines), h, strings.Join(lines, "\n"))
+			}
+			if !strings.HasPrefix(lines[0], "lsoff") {
+				t.Fatalf("h=%d %s: title is not the first line: %q", h, st.name, lines[0])
+			}
+			// The rows View draws must be exactly the rows rowIndexAt maps
+			// clicks to, and the selected row must be among them.
+			drawn := min(m.pageSize(), len(m.rows)-m.offset)
+			for k := 0; k < drawn; k++ {
+				y := viewRowsY + k
+				i, ok := m.rowIndexAt(y)
+				want := fmt.Sprintf("  %5d  ", m.rows[m.offset+k].e.Port)
+				if !ok || i != m.offset+k || !strings.Contains(lines[y], want) {
+					t.Fatalf("h=%d %s: line %d = %q, rowIndexAt=(%d, %v), want row %d (port%s)", h, st.name, y, lines[y], i, ok, m.offset+k, want)
+				}
+			}
+			if _, ok := m.rowIndexAt(viewRowsY + drawn); ok {
+				t.Fatalf("h=%d %s: rowIndexAt hits line %d below the drawn rows", h, st.name, viewRowsY+drawn)
+			}
+			if len(m.rows) > 0 && (m.cursor < m.offset || m.cursor >= m.offset+drawn) {
+				t.Fatalf("h=%d %s: cursor %d not among drawn rows [%d, %d)", h, st.name, m.cursor, m.offset, m.offset+drawn)
+			}
 		}
 	}
 }

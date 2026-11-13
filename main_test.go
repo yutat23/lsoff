@@ -234,6 +234,34 @@ func TestRunHelpVersion(t *testing.T) {
 	}
 }
 
+// TestUsageListsTUIKeys: the TUI: section of -h fell behind the key handlers
+// in internal/tui. Pin the keys it used to miss, and the two-column layout.
+func TestUsageListsTUIKeys(t *testing.T) {
+	_, section, ok := strings.Cut(usage(), "\nTUI:\n")
+	if !ok {
+		t.Fatalf("no TUI: section:\n%s", usage())
+	}
+	var keys []string
+	for _, line := range strings.Split(strings.TrimRight(section, "\n"), "\n") {
+		// Two-space indent, a 23-cell key column, then the description.
+		r := []rune(line)
+		if len(r) < 26 || string(r[:2]) != "  " || r[24] != ' ' || r[25] == ' ' {
+			t.Fatalf("misaligned TUI line: %q", line)
+		}
+		keys = append(keys, string(r[2:25]))
+	}
+	col := strings.Join(keys, "\n")
+	for _, want := range []string{
+		"ctrl+f", "enter while searching", "ctrl+p", "ctrl+n", "ctrl+u", "ctrl+d",
+		"pgup", "pgdn", "g / G", "home", "end", "click a row", "4 / 6", "click ▸",
+		"← / →", "ctrl+r", "q / ctrl+c",
+	} {
+		if !strings.Contains(col, want) {
+			t.Fatalf("usage TUI: section does not list %q:\n%s", want, section)
+		}
+	}
+}
+
 // A bare number that cannot be a port is a typo, not a search term.
 func TestParseArgsOutOfRangePort(t *testing.T) {
 	for _, arg := range []string{"65536", "99999999999"} {
@@ -372,5 +400,88 @@ func TestRunKillConfirmation(t *testing.T) {
 	}
 	if !strings.Contains(errw.String(), "cancelled") {
 		t.Fatalf("%s", errw.String())
+	}
+}
+
+func dockerEntry(port uint16, addr, name string) listen.Entry {
+	return listen.Entry{
+		Proto: listen.TCP, Port: port, Addr: addr, Name: "docker:" + name,
+		Source: listen.SourceDocker, ContainerID: name + "-id",
+	}
+}
+
+// Docker rows have no PID by design, so "try as root" would send the user the
+// wrong way: the message must name the container and docker stop instead.
+func TestRunKillDockerOnlyPointsAtDockerStop(t *testing.T) {
+	stubKill(t, func(id listen.Ident) error {
+		t.Fatalf("killed %+v for a Docker-only port", id)
+		return nil
+	})
+	cases := []struct {
+		name    string
+		entries []listen.Entry
+		want    string
+	}{
+		{
+			"one container on v4 and v6",
+			[]listen.Entry{dockerEntry(8080, "0.0.0.0", "web"), dockerEntry(8080, "::", "web")},
+			"no process ids to kill: published by Docker container web; lsoff cannot stop containers (use docker stop web)",
+		},
+		{
+			"two containers, escape sanitized",
+			[]listen.Entry{dockerEntry(8080, "0.0.0.0", "web"), dockerEntry(8080, "127.0.0.1", "d\x1b[31mb")},
+			"no process ids to kill: published by Docker containers web, db; lsoff cannot stop containers (use docker stop web db)",
+		},
+		{
+			"container beside an unknown pid",
+			[]listen.Entry{dockerEntry(8080, "0.0.0.0", "web"), {Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1"}},
+			"no process ids to kill: published by Docker container web; lsoff cannot stop containers (use docker stop web); other listeners have an unknown pid (try as root)",
+		},
+	}
+	for _, c := range cases {
+		stubEntries(t, c.entries)
+		var out, errw bytes.Buffer
+		err := run([]string{"-k", "-y", "8080"}, strings.NewReader(""), &out, &errw)
+		var ee *exitError
+		if !errors.As(err, &ee) || ee.code != 1 {
+			t.Fatalf("%s: err=%v, want exit 1", c.name, err)
+		}
+		if ee.msg != c.want {
+			t.Fatalf("%s:\ngot  %q\nwant %q", c.name, ee.msg, c.want)
+		}
+	}
+}
+
+func TestRunKillUnknownPIDSuggestsRoot(t *testing.T) {
+	stubEntries(t, []listen.Entry{{Proto: listen.TCP, Port: 2222, Addr: "0.0.0.0"}})
+	var out, errw bytes.Buffer
+	err := run([]string{"-k", "-y", "2222"}, strings.NewReader(""), &out, &errw)
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != 1 || ee.msg != "no process ids to kill (try as root)" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// A Docker row on the same port must not get in the way of killing a real
+// process there.
+func TestRunKillRealProcessBesideDocker(t *testing.T) {
+	stubEntries(t, []listen.Entry{
+		dockerEntry(8080, "0.0.0.0", "web"),
+		{Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", PID: 11, Start: 1, Name: "node"},
+	})
+	var killed []int
+	stubKill(t, func(id listen.Ident) error {
+		killed = append(killed, id.PID)
+		return nil
+	})
+	var out, errw bytes.Buffer
+	if err := run([]string{"-k", "-y", "8080"}, strings.NewReader(""), &out, &errw); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(killed) != 1 || killed[0] != 11 {
+		t.Fatalf("killed=%v", killed)
+	}
+	if errw.String() != "killed pid 11\n" {
+		t.Fatalf("%q", errw.String())
 	}
 }

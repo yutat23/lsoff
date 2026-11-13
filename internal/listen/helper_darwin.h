@@ -6,6 +6,14 @@
 
 int lsoff_parse_listen(const struct socket_fdinfo *si, int *proto, int *port, char *addr, int addrlen);
 
+/*
+ * lsoff_format_xinpcb_addr renders the local address of a sysctl PCB record
+ * exactly as lsoff_parse_listen renders a libproc one. It is exported so tests
+ * can check that the two paths agree.
+ */
+struct xinpcb64;
+void lsoff_format_xinpcb_addr(const struct xinpcb64 *xi, char *addr, size_t addrlen);
+
 /* One listening socket found by walking the kernel PCB lists. */
 struct lsoff_socket {
 	int proto; /* IPPROTO_TCP or IPPROTO_UDP */

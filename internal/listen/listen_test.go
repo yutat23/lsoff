@@ -55,19 +55,6 @@ func TestFilterHasPID(t *testing.T) {
 	}
 }
 
-func TestUniquePIDs(t *testing.T) {
-	in := []Entry{
-		{PID: 10},
-		{PID: 0},
-		{PID: 10},
-		{PID: 11},
-	}
-	got := UniquePIDs(in)
-	if len(got) != 2 || got[0] != 10 || got[1] != 11 {
-		t.Fatalf("%v", got)
-	}
-}
-
 func TestFilterQuery(t *testing.T) {
 	in := []Entry{
 		{Proto: TCP, Port: 8080, Addr: "127.0.0.1", PID: 99, Name: "node", Path: "/usr/bin/node"},

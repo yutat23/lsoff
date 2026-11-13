@@ -36,6 +36,16 @@ func listWithDocker(entries []Entry) []Entry {
 	return mergeDocker(entries, dockerEntries)
 }
 
+// ContainerName returns what to pass to docker stop for a Docker row: the
+// name listWithDocker put after "docker:", or the container ID without one.
+// It is raw Docker metadata, so callers sanitize it before display.
+func ContainerName(e Entry) string {
+	if name, ok := strings.CutPrefix(e.Name, "docker:"); ok && name != "" {
+		return name
+	}
+	return e.ContainerID
+}
+
 // mergeDocker gives a Docker publication precedence over an anonymous host
 // row or a clearly identified docker-proxy row with the same listener
 // identity. A real, identified host process is retained because the mapping
