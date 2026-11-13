@@ -319,17 +319,26 @@ Flags:
 
 TUI:
   / or click Search      filter as you type
+  ctrl+f                 same as /
+  enter while searching  keep the filter, return to the list
   ↑/↓ / j/k / wheel      move
+  ctrl+p / ctrl+n        move up / down
+  ctrl+u / ctrl+d        page up / down
+  pgup / pgdn            page up / down
+  g / G / home / end     first / last row
+  click a row            select it
   click header           sort by column
   p                      hide rows with an unknown PID
+  4 / 6                  IPv4 / IPv6 only (same key again shows both)
   y                      copy addr:port
   a                      auto-refresh every 2s
   s / S                  sort / reverse
-  enter / space          expand or collapse a process
-  h / l                  collapse / expand
+  enter / space          expand or collapse a group
+  click ▸                expand or collapse a group
+  h / l / ← / →          collapse / expand
   esc / ctrl+c           clear search
-  r                      reload now
+  r / ctrl+r             reload now
   x                      kill selected process (asks for confirmation)
-  q                      quit
+  q / ctrl+c             quit (outside search)
 `
 }

@@ -75,8 +75,10 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | Key / action | What it does |
 |------|------|
 | `/` / click `Search:` / `ctrl+f` | Search (port, PID, name, project, path, cmdline; spaces are AND) |
-| `↑` / `↓` / `j` / `k` / click / wheel | Move and select (works while searching too) |
-| `ctrl+u` / `ctrl+d` | Move one page up / down (works while searching too) |
+| `enter` while searching | Keep the search and return to the list |
+| `↑` / `↓` / `j` / `k` / `ctrl+p` / `ctrl+n` / click / wheel | Move and select (works while searching too) |
+| `ctrl+u` / `ctrl+d` / `pgup` / `pgdn` | Move one page up / down (works while searching too) |
+| `g` / `G` / `home` / `end` | Jump to the first / last row |
 | Click a header | Sort by that column (click again for descending) |
 | `s` / `S` | Cycle sort column / toggle ascending-descending |
 | `p` | Hide rows with an unknown PID (toggle) |
@@ -85,11 +87,11 @@ tcp    8080  127.0.0.1    41233  lsoff    node     /usr/local/bin/node  /usr/loc
 | `y` | Copy the selected `addr:port` |
 | `a` | Auto-refresh every 2 seconds (toggle) |
 | `enter` / `space` / click `▸` | Expand or collapse sockets within a group |
-| `h` / `l` | Collapse / expand |
+| `h` / `l` / `←` / `→` | Collapse / expand |
 | `esc` / `ctrl+c` | Clear the search |
-| `r` | Reload the list now |
+| `r` / `ctrl+r` | Reload the list now |
 | `x` | Kill the selected process (asks first) |
-| `q` | Quit |
+| `q` / `ctrl+c` | Quit (when not searching) |
 
 In the TUI, `tcp` is green and `udp` is amber. The selected row uses the highlight background instead. The CLI table stays uncolored so it stays script-friendly. Process names, command lines, and paths are sanitized for the terminal (control characters and ANSI/OSC sequences). JSON keeps the original strings.
 

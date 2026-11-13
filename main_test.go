@@ -234,6 +234,34 @@ func TestRunHelpVersion(t *testing.T) {
 	}
 }
 
+// TestUsageListsTUIKeys: the TUI: section of -h fell behind the key handlers
+// in internal/tui. Pin the keys it used to miss, and the two-column layout.
+func TestUsageListsTUIKeys(t *testing.T) {
+	_, section, ok := strings.Cut(usage(), "\nTUI:\n")
+	if !ok {
+		t.Fatalf("no TUI: section:\n%s", usage())
+	}
+	var keys []string
+	for _, line := range strings.Split(strings.TrimRight(section, "\n"), "\n") {
+		// Two-space indent, a 23-cell key column, then the description.
+		r := []rune(line)
+		if len(r) < 26 || string(r[:2]) != "  " || r[24] != ' ' || r[25] == ' ' {
+			t.Fatalf("misaligned TUI line: %q", line)
+		}
+		keys = append(keys, string(r[2:25]))
+	}
+	col := strings.Join(keys, "\n")
+	for _, want := range []string{
+		"ctrl+f", "enter while searching", "ctrl+p", "ctrl+n", "ctrl+u", "ctrl+d",
+		"pgup", "pgdn", "g / G", "home", "end", "click a row", "4 / 6", "click ▸",
+		"← / →", "ctrl+r", "q / ctrl+c",
+	} {
+		if !strings.Contains(col, want) {
+			t.Fatalf("usage TUI: section does not list %q:\n%s", want, section)
+		}
+	}
+}
+
 // A bare number that cannot be a port is a typo, not a search term.
 func TestParseArgsOutOfRangePort(t *testing.T) {
 	for _, arg := range []string{"65536", "99999999999"} {
