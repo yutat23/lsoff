@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TUI: a list reload that finished while the kill confirmation was open could move the selection to another row, and `y` then killed that process instead of the one named when `x` was pressed. The confirmation now keeps the process it was opened for.
 - TUI: the `PORT` and `ID` detail lines of a Docker row were indented by 12 spaces instead of starting at the left edge like `SVC` and `SRC`.
 
 ## [0.1.5] - 2026-09-09

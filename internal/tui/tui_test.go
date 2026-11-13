@@ -549,6 +549,120 @@ func TestXStartsKillConfirm(t *testing.T) {
 	}
 }
 
+// stubKill replaces killOne for the test and records every identity it is
+// asked to kill, so no real process is ever signalled.
+func stubKill(t *testing.T) *[]listen.Ident {
+	t.Helper()
+	var got []listen.Ident
+	prev := killOne
+	killOne = func(id listen.Ident) error {
+		got = append(got, id)
+		return nil
+	}
+	t.Cleanup(func() { killOne = prev })
+	return &got
+}
+
+// TestKillConfirmSurvivesReload: a reload already in flight when x was pressed
+// used to land during the dialog, drop the confirmed row, leave the cursor on
+// the next process, and make both the box and y switch to that process.
+func TestKillConfirmSurvivesReload(t *testing.T) {
+	killed := stubKill(t)
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"},
+		{Proto: listen.TCP, Port: 8001, Addr: "127.0.0.1", PID: 101, Start: 1001, Name: "bravo"},
+		{Proto: listen.TCP, Port: 8002, Addr: "127.0.0.1", PID: 102, Start: 1002, Name: "charlie"},
+	}
+	m.applyFilter()
+	m.cursor = 0
+
+	// A reload is in flight before x is pressed.
+	m, _ = m.beginLoad()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = next.(model)
+	if !m.confirm {
+		t.Fatal("expected confirm after x")
+	}
+
+	// The reload lands while the dialog is open, without the confirmed process.
+	next, _ = m.Update(loadedMsg{gen: m.loadGen, entries: []listen.Entry{m.all[1], m.all[2]}})
+	m = next.(model)
+	if !m.confirm {
+		t.Fatal("reload closed the confirmation")
+	}
+	if e, ok := m.selected(); !ok || e.PID != 101 {
+		t.Fatalf("precondition: cursor should now be on pid 101, got %+v ok=%v", e, ok)
+	}
+
+	view := listen.SanitizeDisplay(m.View())
+	if !strings.Contains(view, "Kill alpha (pid 100)?") {
+		t.Fatalf("confirm box retargeted after reload: %q", view)
+	}
+	if strings.Contains(view, "Kill bravo") {
+		t.Fatalf("confirm box names the row under the cursor: %q", view)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = next.(model)
+	if m.confirm || m.confirmID != (listen.Ident{}) || m.confirmName != "" {
+		t.Fatalf("y did not clear the dialog: confirm=%v id=%+v name=%q", m.confirm, m.confirmID, m.confirmName)
+	}
+	if cmd == nil {
+		t.Fatal("y should return a kill command")
+	}
+	raw := cmd()
+	msg, ok := raw.(killedMsg)
+	if !ok {
+		t.Fatalf("kill command returned %T", raw)
+	}
+	want := listen.Ident{PID: 100, Start: 1000}
+	if len(*killed) != 1 || (*killed)[0] != want {
+		t.Fatalf("killed %+v, want exactly %+v", *killed, want)
+	}
+	if msg.pid != 100 {
+		t.Fatalf("killedMsg pid=%d, want 100", msg.pid)
+	}
+}
+
+// TestKillConfirmCancelClearsTarget: closing the dialog must drop the captured
+// target so it cannot be reused by a later confirmation.
+func TestKillConfirmCancelClearsTarget(t *testing.T) {
+	killed := stubKill(t)
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("n")},
+		{Type: tea.KeyEsc},
+		{Type: tea.KeyRunes, Runes: []rune("q")},
+	} {
+		m := newModel(false, false, false, "")
+		m.width = 80
+		m.height = 24
+		m.loading = false
+		m.rows = []viewRow{
+			{e: listen.Entry{Proto: listen.TCP, Port: 80, PID: 12, Start: 1, Name: "nginx"}},
+		}
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+		m = next.(model)
+		if m.confirmID != (listen.Ident{PID: 12, Start: 1}) || m.confirmName != "nginx" {
+			t.Fatalf("x captured id=%+v name=%q", m.confirmID, m.confirmName)
+		}
+		next, cmd := m.Update(key)
+		m = next.(model)
+		if cmd != nil {
+			t.Fatalf("%s should not return a command", key)
+		}
+		if m.confirm || m.confirmID != (listen.Ident{}) || m.confirmName != "" {
+			t.Fatalf("%s left confirm=%v id=%+v name=%q", key, m.confirm, m.confirmID, m.confirmName)
+		}
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("cancel killed %+v", *killed)
+	}
+}
+
 func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 100

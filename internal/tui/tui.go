@@ -110,6 +110,13 @@ type model struct {
 	sortKey   listen.SortKey
 	sortDesc  bool
 	expanded  map[groupKey]bool
+
+	// confirmID and confirmName are the kill target captured when x opened the
+	// confirmation. A reload already in flight can land while the dialog is
+	// open and move the cursor onto a different process, so the box and y use
+	// this snapshot rather than whatever row is selected at that moment.
+	confirmID   listen.Ident
+	confirmName string
 }
 
 // Run starts the interactive TUI.
@@ -171,9 +178,12 @@ func (m model) autoTick() tea.Cmd {
 	return tea.Tick(autoInterval, func(t time.Time) tea.Msg { return tickMsg{t: t, gen: gen} })
 }
 
+// killOne terminates one process. Tests replace it so no real process dies.
+var killOne = listen.Kill
+
 func killCmd(id listen.Ident) tea.Cmd {
 	return func() tea.Msg {
-		return killedMsg{pid: id.PID, err: listen.Kill(id)}
+		return killedMsg{pid: id.PID, err: killOne(id)}
 	}
 }
 
@@ -303,23 +313,34 @@ func (m model) rowIndexAt(y int) (int, bool) {
 func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		e, ok := m.selected()
-		m.confirm = false
-		if !ok || e.PID <= 0 {
+		// Kill what the user confirmed, not the row under the cursor now: a
+		// reload during the dialog may have retargeted the cursor. If the
+		// confirmed process is already gone, listen.Kill reports that itself.
+		id := m.confirmID
+		m.closeConfirm()
+		if id.PID <= 0 {
 			m.status = "no process to kill"
 			return m, nil
 		}
-		if e.Start == 0 {
+		if id.Start == 0 {
 			m.status = "process identity unknown (refusing to kill)"
 			return m, nil
 		}
-		return m, killCmd(e.Ident())
+		return m, killCmd(id)
 	case "n", "N", "esc", "q":
-		m.confirm = false
+		m.closeConfirm()
 		m.status = "cancelled"
 		return m, nil
 	}
 	return m, nil
+}
+
+// closeConfirm closes the kill dialog and drops its captured target, so a
+// stale target can never leak into a later confirmation.
+func (m *model) closeConfirm() {
+	m.confirm = false
+	m.confirmID = listen.Ident{}
+	m.confirmName = ""
 }
 
 func (m model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -446,6 +467,8 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.confirm = true
+		m.confirmID = e.Ident()
+		m.confirmName = dash(listen.SanitizeDisplay(e.Name))
 		return m, nil
 	case "enter", " ":
 		m.toggleFold()
@@ -721,8 +744,9 @@ func (m model) View() string {
 
 	switch {
 	case m.confirm:
-		e, _ := m.selected()
-		msg := fmt.Sprintf("Kill %s (pid %d)?  y / n", dash(listen.SanitizeDisplay(e.Name)), e.PID)
+		// Render the captured target so the box always names exactly what y
+		// will kill, even if a reload has since moved the cursor.
+		msg := fmt.Sprintf("Kill %s (pid %d)?  y / n", m.confirmName, m.confirmID.PID)
 		// The box adds a border and one cell of padding on each side.
 		b.WriteString(confirmBox.Render(truncate(msg, max(8, m.width-4))) + "\n")
 	case m.err != nil:
