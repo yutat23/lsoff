@@ -98,7 +98,6 @@ type model struct {
 	filtering bool
 	confirm   bool
 	status    string
-	err       error
 	loading   bool
 	loadGen   int
 	wantTCP   bool
@@ -110,6 +109,14 @@ type model struct {
 	sortKey   listen.SortKey
 	sortDesc  bool
 	expanded  map[groupKey]bool
+
+	// err is the failure of the last user action (a kill or a copy) and
+	// loadErr that of the last load. They are kept apart so a successful
+	// reload can clear its own earlier failure without erasing an action
+	// error the user has not read yet; that one stays until the next action
+	// that reports something (see setStatus) or r.
+	err     error
+	loadErr error
 
 	// countStatus is the socket-count message the last reload produced. A
 	// reload may replace the status only while it still shows its own output
@@ -179,6 +186,15 @@ func (m model) beginLoad() (model, tea.Cmd) {
 	return m, m.loadCmd(m.loadGen)
 }
 
+// setStatus reports the outcome of a user action. The new feedback replaces
+// an earlier action error: View shows an error in preference to the status,
+// so a stale kill or copy failure would otherwise hide it. Reloads never call
+// this, which is what lets an action error survive auto-refresh.
+func (m *model) setStatus(s string) {
+	m.err = nil
+	m.status = s
+}
+
 func (m model) autoTick() tea.Cmd {
 	if !m.auto {
 		return nil
@@ -189,6 +205,10 @@ func (m model) autoTick() tea.Cmd {
 
 // killOne terminates one process. Tests replace it so no real process dies.
 var killOne = listen.Kill
+
+// writeClipboard copies text for y. Tests replace it so they never touch the
+// real clipboard.
+var writeClipboard = clipboard.WriteAll
 
 func killCmd(id listen.Ident) tea.Cmd {
 	return func() tea.Msg {
@@ -210,7 +230,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = false
-		m.err = msg.err
+		m.loadErr = msg.err
 		if msg.err == nil {
 			m.all = msg.entries
 			m.applyFilter()
@@ -228,8 +248,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.err = nil
-		m.status = fmt.Sprintf("killed pid %d", msg.pid)
+		m.setStatus(fmt.Sprintf("killed pid %d", msg.pid))
 		return m.beginLoad()
 
 	case tickMsg:
@@ -348,17 +367,17 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		id := m.confirmID
 		m.closeConfirm()
 		if id.PID <= 0 {
-			m.status = "no process to kill"
+			m.setStatus("no process to kill")
 			return m, nil
 		}
 		if id.Start == 0 {
-			m.status = "process identity unknown (refusing to kill)"
+			m.setStatus("process identity unknown (refusing to kill)")
 			return m, nil
 		}
 		return m, killCmd(id)
 	case "n", "N", "esc", "q":
 		m.closeConfirm()
-		m.status = "cancelled"
+		m.setStatus("cancelled")
 		return m, nil
 	}
 	return m, nil
@@ -426,37 +445,39 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "r", "ctrl+r":
-		m.err = nil
-		m.status = refreshingStatus
+		// r is the explicit retry, so it also drops the last load's error;
+		// the reload it starts reports a fresh one if the listing still fails.
+		m.loadErr = nil
+		m.setStatus(refreshingStatus)
 		return m.beginLoad()
 	case "a":
 		m.auto = !m.auto
 		m.autoGen++
 		if m.auto {
-			m.status = "auto-refresh on"
+			m.setStatus("auto-refresh on")
 			if m.loading {
 				return m, m.autoTick()
 			}
 			m, cmd := m.beginLoad()
 			return m, tea.Batch(cmd, m.autoTick())
 		}
-		m.status = "auto-refresh off"
+		m.setStatus("auto-refresh off")
 		return m, nil
 	case "s":
 		m.cycleSort()
 		m.applyFilter()
-		m.status = "sort " + m.sortKey.String()
+		m.setStatus("sort " + m.sortKey.String())
 		return m, nil
 	case "S":
 		m.sortDesc = !m.sortDesc
 		m.applyFilter()
-		m.status = "sort " + m.sortKey.String()
+		m.setStatus("sort " + m.sortKey.String())
 	case "p", "P":
 		m.onlyPID = !m.onlyPID
 		if m.onlyPID {
-			m.status = "hiding rows with an unknown pid"
+			m.setStatus("hiding rows with an unknown pid")
 		} else {
-			m.status = "showing all listeners"
+			m.setStatus("showing all listeners")
 		}
 		m.applyFilter()
 		return m, nil
@@ -469,36 +490,35 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		e, ok := m.selected()
 		if !ok {
-			m.status = "nothing selected"
+			m.setStatus("nothing selected")
 			return m, nil
 		}
 		ep := listen.Endpoint(e)
-		if err := clipboard.WriteAll(ep); err != nil {
+		if err := writeClipboard(ep); err != nil {
 			m.status = ""
 			m.err = fmt.Errorf("copy: %w", err)
 			return m, nil
 		}
-		m.err = nil
-		m.status = "copied " + ep
+		m.setStatus("copied " + ep)
 		return m, nil
 	case "x":
 		e, ok := m.selected()
 		if !ok {
-			m.status = "nothing selected"
+			m.setStatus("nothing selected")
 			return m, nil
 		}
 		// A Docker row never has a PID, so root would not help; point at the
 		// tool that can stop it instead.
 		if e.Source == listen.SourceDocker {
-			m.status = "Docker container: lsoff cannot stop it (docker stop " + listen.SanitizeDisplay(listen.ContainerName(e)) + ")"
+			m.setStatus("Docker container: lsoff cannot stop it (docker stop " + listen.SanitizeDisplay(listen.ContainerName(e)) + ")")
 			return m, nil
 		}
 		if e.PID <= 0 {
-			m.status = "pid unknown (try as root)"
+			m.setStatus("pid unknown (try as root)")
 			return m, nil
 		}
 		if e.Start == 0 {
-			m.status = "process identity unknown (refusing to kill)"
+			m.setStatus("process identity unknown (refusing to kill)")
 			return m, nil
 		}
 		m.confirm = true
@@ -790,7 +810,11 @@ func (m model) View() string {
 		// The box adds a border and one cell of padding on each side.
 		b.WriteString(confirmBox.Render(truncate(msg, max(8, m.width-4))) + "\n")
 	case m.err != nil:
+		// The action error comes first: it is what the user is waiting to
+		// read, and once their next action replaces it a failing load shows.
 		b.WriteString(errStyle.Render(truncate(listen.SanitizeDisplay(m.err.Error()), m.width)) + "\n")
+	case m.loadErr != nil:
+		b.WriteString(errStyle.Render(truncate(listen.SanitizeDisplay(m.loadErr.Error()), m.width)) + "\n")
 	case m.status != "":
 		b.WriteString(okStyle.Render(truncate(listen.SanitizeDisplay(m.status), m.width)) + "\n")
 	default:

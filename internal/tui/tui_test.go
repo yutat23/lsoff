@@ -773,6 +773,134 @@ func TestKillStatusSurvivesReload(t *testing.T) {
 	}
 }
 
+// stubClipboard replaces writeClipboard for the test so y never touches the
+// real clipboard; it fails with err when err is non-nil.
+func stubClipboard(t *testing.T, err error) {
+	t.Helper()
+	prev := writeClipboard
+	writeClipboard = func(string) error { return err }
+	t.Cleanup(func() { writeClipboard = prev })
+}
+
+// TestActionErrorSurvivesReload: every completed reload used to set m.err to
+// its own (nil) error, so with auto-refresh a failed kill or copy vanished
+// within two seconds while success feedback stayed. An action error now stays
+// until the next action that reports something, or r.
+func TestActionErrorSurvivesReload(t *testing.T) {
+	entries := []listen.Entry{
+		{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"},
+		{Proto: listen.TCP, Port: 8001, Addr: "127.0.0.1", PID: 101, Start: 1001, Name: "bravo"},
+	}
+	cases := []struct {
+		name string
+		fail func(tea.Model) tea.Model
+		want string
+	}{
+		{"kill", func(mm tea.Model) tea.Model {
+			next, _ := mm.Update(killedMsg{pid: 100, err: fmt.Errorf("operation not permitted")})
+			return next
+		}, "operation not permitted"},
+		{"copy", func(mm tea.Model) tea.Model {
+			stubClipboard(t, fmt.Errorf("no clipboard utility"))
+			next, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+			return next
+		}, "copy: no clipboard utility"},
+	}
+	for _, c := range cases {
+		var mm tea.Model = newModel(false, false, false, "")
+		mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+		load := func() {
+			t.Helper()
+			mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries})
+		}
+		view := func() string { return listen.SanitizeDisplay(mm.(model).View()) }
+		load()
+		mm = c.fail(mm)
+		if !strings.Contains(view(), c.want) {
+			t.Fatalf("%s: error not shown: %q", c.name, view())
+		}
+		// Several reloads, as auto-refresh does every two seconds.
+		for i := 0; i < 3; i++ {
+			load()
+			if !strings.Contains(view(), c.want) {
+				t.Fatalf("%s: reload %d erased the action error: %q", c.name, i, view())
+			}
+		}
+		// The next action that reports something replaces the stale error.
+		mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+		if got := mm.(model); got.err != nil || got.status != "sort name" {
+			t.Fatalf("%s: s left err=%v status=%q", c.name, got.err, got.status)
+		}
+		if v := view(); strings.Contains(v, c.want) || !strings.Contains(v, "sort name") {
+			t.Fatalf("%s: s feedback hidden by the stale error: %q", c.name, v)
+		}
+
+		// r clears the error and reloads.
+		mm = c.fail(mm)
+		next, cmd := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+		mm = next
+		if got := mm.(model); cmd == nil || !got.loading || got.err != nil {
+			t.Fatalf("%s: r cmd=%v loading=%v err=%v", c.name, cmd != nil, got.loading, got.err)
+		}
+		if v := view(); strings.Contains(v, c.want) || !strings.Contains(v, refreshingStatus) {
+			t.Fatalf("%s: r did not replace the error: %q", c.name, v)
+		}
+	}
+
+	// A successful copy replaces an earlier copy error.
+	stubClipboard(t, nil)
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.all = entries
+	m.applyFilter()
+	m.err = fmt.Errorf("copy: no clipboard utility")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if got := next.(model); got.err != nil || got.status != "copied 127.0.0.1:8000" {
+		t.Fatalf("successful copy left err=%v status=%q", got.err, got.status)
+	}
+}
+
+// TestLoadErrorClearedByNextLoad: a failed reload reports its error, and the
+// next successful one clears it, so a transient listing failure under
+// auto-refresh heals itself. An action error outranks it on screen.
+func TestLoadErrorClearedByNextLoad(t *testing.T) {
+	entries := []listen.Entry{{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"}}
+	var mm tea.Model = newModel(false, false, false, "")
+	mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	load := func(err error) {
+		t.Helper()
+		mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries, err: err})
+	}
+	view := func() string { return listen.SanitizeDisplay(mm.(model).View()) }
+
+	load(nil)
+	load(fmt.Errorf("listing failed"))
+	if !strings.Contains(view(), "listing failed") {
+		t.Fatalf("load error not shown: %q", view())
+	}
+	load(nil)
+	if v := view(); strings.Contains(v, "listing failed") || !strings.Contains(v, "1 listening sockets") {
+		t.Fatalf("successful load did not clear the load error: %q", v)
+	}
+
+	// With both, the action error shows; once an action replaces it, the
+	// still-current load error is back, and the next good load clears it.
+	mm, _ = mm.Update(killedMsg{pid: 100, err: fmt.Errorf("operation not permitted")})
+	load(fmt.Errorf("listing failed"))
+	if v := view(); !strings.Contains(v, "operation not permitted") || strings.Contains(v, "listing failed") {
+		t.Fatalf("action error should outrank the load error: %q", v)
+	}
+	mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v := view(); !strings.Contains(v, "listing failed") {
+		t.Fatalf("load error lost after the action error was replaced: %q", v)
+	}
+	load(nil)
+	if v := view(); strings.Contains(v, "listing failed") || !strings.Contains(v, "sort name") {
+		t.Fatalf("good load after both errors: %q", v)
+	}
+}
+
 // TestKillConfirmCancelClearsTarget: closing the dialog must drop the captured
 // target so it cannot be reused by a later confirmation.
 func TestKillConfirmCancelClearsTarget(t *testing.T) {
