@@ -750,14 +750,14 @@ func (m model) View() string {
 	if m.onlyPID {
 		flags += "  pid"
 	}
-	meta := helpStyle.Render(fmt.Sprintf("  %d/%d%s%s  %s%s", len(m.rows), len(m.all), flags, ipFamilyLabel(m.ipFamily), m.sortKey.String(), arrow))
+	meta := []string{fmt.Sprintf("  %d/%d%s%s  %s%s", len(m.rows), len(m.all), flags, ipFamilyLabel(m.ipFamily), m.sortKey.String(), arrow)}
 	if m.auto {
-		meta += helpStyle.Render("  auto")
+		meta = append(meta, "  auto")
 	}
 	if m.loading {
-		meta += helpStyle.Render("  loading")
+		meta = append(meta, "  loading")
 	}
-	b.WriteString(title + meta + "\n")
+	b.WriteString(title + renderParts(meta, m.width-lipgloss.Width("lsoff"), helpStyle) + "\n")
 
 	b.WriteString(m.filter.View() + "\n")
 
@@ -766,7 +766,7 @@ func (m model) View() string {
 	ps := m.pageSize()
 	end := min(m.offset+ps, len(m.rows))
 	if len(m.rows) == 0 {
-		b.WriteString(helpStyle.Render("  no matching listeners") + "\n")
+		b.WriteString(helpStyle.Render(truncate("  no matching listeners", m.width)) + "\n")
 	} else {
 		for i := m.offset; i < end; i++ {
 			b.WriteString(m.formatRow(m.rows[i], i == m.cursor) + "\n")
@@ -787,7 +787,7 @@ func (m model) View() string {
 		// Every detail line is prefixed with a 6-cell label, so its value gets
 		// width-6 cells. Without this a long macOS bundle path wraps in the
 		// terminal and pushes the footer off screen.
-		detail := max(8, m.width-6)
+		detail := max(1, m.width-6)
 		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
 		if e.Source == listen.SourceDocker {
 			// The container fields come from the Docker Engine API. Sanitize
@@ -871,6 +871,8 @@ func renderShortcuts(width int) string {
 		{all[0], all[1], all[2], all[8], all[9], all[10]},
 		{all[0], all[1], all[8], all[9], all[10]},
 		{all[0], all[8], all[9]},
+		{all[0], all[9]},
+		{all[9]},
 	}
 	line := joinShortcuts(variants[len(variants)-1])
 	for _, items := range variants {
@@ -883,7 +885,12 @@ func renderShortcuts(width int) string {
 
 	style := shortcutBar
 	if width > 0 {
-		style = style.Width(width).MaxWidth(width)
+		// Width pads the bar to the terminal but wraps a longer line onto
+		// extra lines, which would grow the view; MaxWidth alone cuts it.
+		if lipgloss.Width(" "+line) <= width {
+			style = style.Width(width)
+		}
+		style = style.MaxWidth(width)
 	}
 	return style.Render(" " + line)
 }
@@ -907,9 +914,12 @@ func protoLabel(tcp, udp bool) string {
 	}
 }
 
+// formatHeader and formatRow keep the column grid at every width, so header
+// clicks and the fold hit-test stay valid; a terminal too narrow for the grid
+// cuts the line at its edge instead of wrapping it onto the next row.
 func (m model) formatHeader() string {
-	return fmt.Sprintf("%s%-5s  %5s  %-21s  %7s  %-14s  %s",
-		strings.Repeat(" ", colProtoX), "PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS")
+	return truncate(fmt.Sprintf("%s%-5s  %5s  %-21s  %7s  %-14s  %s",
+		strings.Repeat(" ", colProtoX), "PROTO", "PORT", "ADDRESS", "PID", "PROJECT", "PROCESS"), m.width)
 }
 
 func (m model) formatRow(r viewRow, selected bool) string {
@@ -933,10 +943,18 @@ func (m model) formatRow(r viewRow, selected bool) string {
 	proto := fmt.Sprintf("%-5s", e.Proto.String())
 	rest := fmt.Sprintf("  %5d  %s  %7s  %s  %s", e.Port, addr, pidCell(e.PID), padRight(truncate(proj, 14), 14), name)
 	mark := " " + r.markCell() + " "
+	// Cut the plain line before styling it: cutting styled text by cells could
+	// split an escape sequence or drop the reset.
+	line := truncate(mark+proto+rest, m.width)
 	if selected {
-		return selStyle.Render(padRight(mark+proto+rest, m.width))
+		return selStyle.Render(padRight(line, m.width))
 	}
-	return mark + protoCell(e.Proto) + rest
+	after, ok := strings.CutPrefix(line, mark+proto)
+	if !ok {
+		// The cut went into PROTO itself; too narrow to color it.
+		return line
+	}
+	return mark + protoCell(e.Proto) + after
 }
 
 func protoCell(p listen.Proto) string {
@@ -959,6 +977,26 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// renderParts renders each part with style, cut together to at most width
+// cells. The cut is made on the plain text, so no escape sequence is split, and
+// the parts before it are rendered exactly as they would be uncut.
+func renderParts(parts []string, width int, style lipgloss.Style) string {
+	rest := truncate(strings.Join(parts, ""), width)
+	var b strings.Builder
+	for _, p := range parts {
+		if !strings.HasPrefix(rest, p) {
+			break
+		}
+		b.WriteString(style.Render(p))
+		rest = rest[len(p):]
+	}
+	if rest != "" {
+		// What is left is the part the cut went through, ending in "…".
+		b.WriteString(style.Render(rest))
+	}
+	return b.String()
 }
 
 // truncate cuts s to at most n terminal cells, appending "…" (one cell) when

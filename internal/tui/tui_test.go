@@ -634,11 +634,19 @@ func TestRenderShortcutsStylesKeys(t *testing.T) {
 	}
 }
 
+// TestRenderShortcutsFitsWidth: below the shortest variant's width, lipgloss
+// Width used to wrap the bar onto a second line, which grew the view by a line.
 func TestRenderShortcutsFitsWidth(t *testing.T) {
-	for _, w := range []int{40, 60, 80, 120} {
+	for _, w := range []int{1, 5, minViewWidth, 16, 20, 26, 27, 30, 40, 60, 80, 120} {
 		got := renderShortcuts(w)
 		if n := lipgloss.Width(got); n > w {
 			t.Fatalf("width %d: rendered %d", w, n)
+		}
+		if strings.Contains(got, "\n") {
+			t.Fatalf("width %d: bar wrapped onto more lines: %q", w, got)
+		}
+		if w >= minViewWidth && !strings.Contains(got, "quit") {
+			t.Fatalf("width %d: bar lost quit: %q", w, got)
 		}
 		if n := lipgloss.Width(renderFooterRule(w)); n != w {
 			t.Fatalf("rule width %d: rendered %d", w, n)
@@ -1105,43 +1113,140 @@ func TestTogglePIDFilter(t *testing.T) {
 	}
 }
 
-// TestViewFitsWidth pins the detail block to the terminal width: an over-long
-// PATH used to wrap and push the footer off screen.
+// minViewWidth is the narrowest terminal every line of the view fits in. The
+// search line needs its prompt plus two cells (10), but the Docker detail line
+// "SRC   docker" is a fixed 12 cells.
+const minViewWidth = 12
+
+// TestViewFitsWidth: a line wider than the terminal wraps, which pushes the
+// footer off screen and shifts every line below it off the fixed mouse Y
+// offsets. An over-long PATH used to wrap, and below about 74 columns so did
+// the title line, the header, every row and the shortcut bar.
 func TestViewFitsWidth(t *testing.T) {
 	const longPath = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/140.0.7339.80/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"
-	m := newModel(false, false, false, "")
-	m.width = 80
-	m.height = 24
-	m.loading = false
-	m.filter.Width = max(10, m.width-4)
-	m.all = []listen.Entry{{
-		Proto:   listen.TCP,
-		Port:    8080,
-		Addr:    "127.0.0.1",
-		PID:     900,
-		Name:    "Google Chrome Helper",
-		Path:    longPath,
-		Cmdline: strings.Repeat("x", 300),
-		Cwd:     "/" + strings.Repeat("y", 299),
-		Project: "lsoff",
-	}}
-	m.applyFilter()
-	m.status = strings.Repeat("s", 200)
-
 	if n := lipgloss.Width(longPath); n < 120 {
 		t.Fatalf("test path too short to be interesting: %d cells", n)
 	}
-	for i, line := range strings.Split(m.View(), "\n") {
-		if n := lipgloss.Width(line); n > m.width {
-			t.Fatalf("line %d is %d cells wide, want <= %d: %q", i, n, m.width, listen.SanitizeDisplay(line))
+	chrome := func(addr string) listen.Entry {
+		return listen.Entry{
+			Proto: listen.TCP, Port: 3000, Addr: addr, PID: 900, Start: 1,
+			Name: "Google Chrome Helper (Renderer)", Path: longPath,
+			Cmdline: strings.Repeat("x", 300), Cwd: "/" + strings.Repeat("y", 299), Project: "lsoff",
 		}
 	}
+	entries := []listen.Entry{
+		{Proto: listen.TCP, Port: 22, Addr: "0.0.0.0", PID: 1, Start: 1, Name: "sshd", Path: "/usr/sbin/sshd"},
+		// One process on three addresses: a group with tree children.
+		chrome("127.0.0.1"), chrome("0.0.0.0"), chrome("192.168.100.200"),
+		{
+			Proto: listen.UDP, Port: 5353, Addr: "0.0.0.0", PID: 1200, Start: 1,
+			Name: strings.Repeat("メモ帳", 6), Project: "日本語プロジェクト",
+			Path: "/Applications/" + strings.Repeat("日本語", 20),
+		},
+		{
+			Proto: listen.TCP, Port: 8080, Addr: "0.0.0.0", Name: "docker:web",
+			Source: listen.SourceDocker, ContainerID: "abcdef012345", ContainerPort: 80, ContainerProtocol: "tcp",
+		},
+	}
+	for i := 0; i < 15; i++ {
+		entries = append(entries, listen.Entry{Proto: listen.TCP, Port: uint16(9000 + i), Addr: "127.0.0.1", PID: 2000 + i, Start: 1, Name: "listener"})
+	}
 
-	m.status = ""
-	m.err = fmt.Errorf("%s", strings.Repeat("e", 200))
-	for i, line := range strings.Split(m.View(), "\n") {
-		if n := lipgloss.Width(line); n > m.width {
-			t.Fatalf("error view line %d is %d cells wide, want <= %d", i, n, m.width)
+	key := func(mm tea.Model, msgs ...tea.Msg) tea.Model {
+		for _, msg := range msgs {
+			mm, _ = mm.Update(msg)
+		}
+		return mm
+	}
+	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	moveTo := func(mm tea.Model, port uint16) tea.Model {
+		for i := 0; i < len(entries); i++ {
+			if e, ok := mm.(model).selected(); ok && e.Port == port {
+				return mm
+			}
+			mm = key(mm, runes("j"))
+		}
+		t.Fatalf("precondition: port %d not reachable", port)
+		return mm
+	}
+	states := []struct {
+		name string
+		set  func(tea.Model) tea.Model
+	}{
+		{"normal", func(mm tea.Model) tea.Model { return mm }},
+		{"group selected", func(mm tea.Model) tea.Model { return moveTo(mm, 3000) }},
+		{"CJK row selected", func(mm tea.Model) tea.Model { return moveTo(mm, 5353) }},
+		{"last row selected", func(mm tea.Model) tea.Model { return key(mm, runes("G")) }},
+		{"docker selected", func(mm tea.Model) tea.Model { return moveTo(mm, 8080) }},
+		{"confirming", func(mm tea.Model) tea.Model { return key(moveTo(mm, 3000), runes("x")) }},
+		{"confirming CJK", func(mm tea.Model) tea.Model { return key(moveTo(mm, 5353), runes("x")) }},
+		{"error", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.err = fmt.Errorf("%s", strings.Repeat("権限がありません ", 20))
+			return m
+		}},
+		{"status", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.status = strings.Repeat("s", 200)
+			return m
+		}},
+		{"empty", func(mm tea.Model) tea.Model {
+			return key(mm, runes("/"), runes("zzz"), tea.KeyMsg{Type: tea.KeyEnter})
+		}},
+		{"searching long query", func(mm tea.Model) tea.Model {
+			return key(mm, runes("/"), runes(strings.Repeat("日本語listener", 6)))
+		}},
+		// -t, the pid and IPv4 filters, auto-refresh and a reload in flight.
+		{"all meta flags", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.wantTCP = true
+			return key(m, runes("p"), runes("4"), runes("a"))
+		}},
+		{"expanded group", func(mm tea.Model) tea.Model { return key(moveTo(mm, 3000), runes("l")) }},
+		{"last child selected", func(mm tea.Model) tea.Model {
+			return key(moveTo(mm, 3000), runes("l"), runes("j"), runes("j"))
+		}},
+	}
+	render := func(w int, set func(tea.Model) tea.Model) (model, []string) {
+		var mm tea.Model = newModel(false, false, false, "")
+		// Size the model the way the program does, so the search input is
+		// fitted by fitFilter.
+		mm = key(mm, tea.WindowSizeMsg{Width: w, Height: 24})
+		mm = key(mm, loadedMsg{gen: mm.(model).loadGen, entries: entries})
+		m := set(mm).(model)
+		return m, strings.Split(m.View(), "\n")
+	}
+
+	for _, st := range states {
+		m, wide := render(200, st.set)
+		switch st.name {
+		case "confirming", "confirming CJK":
+			if !m.confirm {
+				t.Fatalf("%s: precondition: confirmation not open", st.name)
+			}
+		case "all meta flags":
+			if !m.wantTCP || !m.onlyPID || m.ipFamily != IPFamilyV4 || !m.auto || !m.loading {
+				t.Fatalf("%s: precondition: flags not all set", st.name)
+			}
+		case "last child selected":
+			if r, ok := m.selectedRow(); !ok || r.fold != foldChild || !r.last {
+				t.Fatalf("%s: precondition: last child not selected: %+v", st.name, r)
+			}
+		}
+		for w := minViewWidth; w <= 120; w++ {
+			_, lines := render(w, st.set)
+			// A wrap inside the view (lipgloss wrapping a line it was told
+			// to pad) would add lines; compare with a comfortable width.
+			if len(lines) != len(wide) {
+				t.Errorf("width %d, %s: view is %d lines, want %d as at width 200", w, st.name, len(lines), len(wide))
+				continue
+			}
+			for i, line := range lines {
+				if n := lipgloss.Width(line); n > w {
+					t.Errorf("width %d, %s: line %d is %d cells wide: %q", w, st.name, i, n, listen.SanitizeDisplay(line))
+					break
+				}
+			}
 		}
 	}
 }

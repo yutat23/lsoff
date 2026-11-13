@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI: a long search query made the search line wider than the terminal (89 cells for an 80-character query in 80 columns), so it wrapped and shifted every row below it, including the rows that mouse clicks are mapped to.
 - TUI: a failed kill or copy was erased by the next successful reload, so with auto-refresh on the error vanished within 2 seconds. Such an error now stays until the next action reports its own result; a listing error is still cleared by the next successful reload.
 - TUI: the `PORT` and `ID` detail lines of a Docker row showed the container protocol and ID without the terminal sanitizing applied to `PATH`, `CMD` and `CWD`.
+- TUI: in a terminal narrower than about 74 columns the title line, the header and every row were wider than the terminal and wrapped, which shifted the lines below them and the rows that mouse clicks are mapped to; below 27 columns the shortcut bar wrapped onto extra lines. Lines are now cut at the terminal edge with `…`, from 12 columns up. Output at 74 columns and wider is unchanged.
 
 ## [0.1.5] - 2026-09-09
 
