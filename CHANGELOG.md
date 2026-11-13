@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: pressing `x` on a Docker row in the TUI, or running `lsoff -k` on a port that only a container publishes, suggested `try as root`, which cannot help. Both now name the container and point at `docker stop`.
 - CLI: the TUI key list in `lsoff -h` had fallen behind the TUI. It now lists `4` / `6`, `ctrl+u` / `ctrl+d`, `ctrl+f`, `g` / `G` and the other keys it was missing; the README key tables gained the same aliases.
 - Linux: killing a process that had already exited between listing and the kill returned `no such process` instead of succeeding quietly as on macOS. A PID that now belongs to a different process is still refused.
+- TUI: `killed pid N` was replaced by the socket count as soon as the reload after the kill finished, so it was visible for only a moment. A finished reload no longer overwrites feedback about an action (`killed pid N`, `copied …`, `auto-refresh on`); the socket count still updates when it is what the status line shows.
 
 ## [0.1.5] - 2026-09-09
 

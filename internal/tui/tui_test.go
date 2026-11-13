@@ -404,6 +404,62 @@ func TestStaleLoadIgnored(t *testing.T) {
 	}
 }
 
+// TestReloadStatusRule: a completed reload shows the socket count only in
+// place of nothing, the "refreshing..." placeholder or an earlier count, so
+// the count stays current across reloads but never overwrites action feedback.
+func TestReloadStatusRule(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	entries := []listen.Entry{
+		{Proto: listen.TCP, Port: 80, Addr: "127.0.0.1", PID: 10, Name: "nginx"},
+		{Proto: listen.TCP, Port: 443, Addr: "127.0.0.1", PID: 10, Name: "nginx"},
+		{Proto: listen.UDP, Port: 53, Addr: "127.0.0.1", PID: 11, Name: "named"},
+	}
+	var mm tea.Model = m
+	load := func(n int) string {
+		t.Helper()
+		next, _ := mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries[:n]})
+		mm = next
+		return mm.(model).status
+	}
+	press := func(key string) string {
+		t.Helper()
+		next, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		mm = next
+		return mm.(model).status
+	}
+
+	if got := load(2); got != "2 listening sockets" {
+		t.Fatalf("initial load status=%q", got)
+	}
+	// Successive reloads (auto-refresh) keep the count current.
+	if got := load(3); got != "3 listening sockets" {
+		t.Fatalf("second load status=%q", got)
+	}
+	if got := press("r"); got != "refreshing..." {
+		t.Fatalf("r status=%q", got)
+	}
+	if got := load(1); got != "1 listening sockets" {
+		t.Fatalf("manual reload status=%q", got)
+	}
+	// Action feedback survives the reloads that follow it.
+	if got := press("a"); got != "auto-refresh on" {
+		t.Fatalf("a status=%q", got)
+	}
+	for i := 0; i < 2; i++ {
+		if got := load(2); got != "auto-refresh on" {
+			t.Fatalf("reload %d replaced action feedback: status=%q", i, got)
+		}
+	}
+	if got := press("r"); got != "refreshing..." {
+		t.Fatalf("r status=%q", got)
+	}
+	if got := load(3); got != "3 listening sockets" {
+		t.Fatalf("reload after action status=%q", got)
+	}
+}
+
 func TestFormatRowSanitizes(t *testing.T) {
 	m := model{width: 80}
 	e := listen.Entry{Proto: listen.TCP, Port: 80, Addr: "127.0.0.1", Name: "a\x1b[31mb", Project: "x"}
@@ -625,6 +681,38 @@ func TestKillConfirmSurvivesReload(t *testing.T) {
 	}
 	if msg.pid != 100 {
 		t.Fatalf("killedMsg pid=%d, want 100", msg.pid)
+	}
+}
+
+// TestKillStatusSurvivesReload: the reload started after a successful kill
+// used to replace "killed pid N" with the socket count as soon as it landed,
+// so the confirmation was on screen for only a few milliseconds.
+func TestKillStatusSurvivesReload(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.all = []listen.Entry{
+		{Proto: listen.TCP, Port: 8000, Addr: "127.0.0.1", PID: 100, Start: 1000, Name: "alpha"},
+		{Proto: listen.TCP, Port: 8001, Addr: "127.0.0.1", PID: 101, Start: 1001, Name: "bravo"},
+	}
+	m.applyFilter()
+
+	next, cmd := m.Update(killedMsg{pid: 100})
+	m = next.(model)
+	if cmd == nil || !m.loading {
+		t.Fatal("a successful kill should start a reload")
+	}
+	next, _ = m.Update(loadedMsg{gen: m.loadGen, entries: []listen.Entry{m.all[1]}})
+	m = next.(model)
+	if len(m.all) != 1 || m.all[0].PID != 101 {
+		t.Fatalf("post-kill reload not applied: %+v", m.all)
+	}
+	if m.status != "killed pid 100" {
+		t.Fatalf("status=%q, want the kill to still be reported", m.status)
+	}
+	if view := listen.SanitizeDisplay(m.View()); !strings.Contains(view, "killed pid 100") {
+		t.Fatalf("kill feedback missing from view: %q", view)
 	}
 }
 

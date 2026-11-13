@@ -111,6 +111,12 @@ type model struct {
 	sortDesc  bool
 	expanded  map[groupKey]bool
 
+	// countStatus is the socket-count message the last reload produced. A
+	// reload may replace the status only while it still shows its own output
+	// (or nothing, or the refresh placeholder), so it never erases feedback
+	// about a user action such as "killed pid N".
+	countStatus string
+
 	// confirmID and confirmName are the kill target captured when x opened the
 	// confirmation. A reload already in flight can land while the dialog is
 	// open and move the cursor onto a different process, so the box and y use
@@ -164,6 +170,9 @@ func (m model) loadCmd(gen int) tea.Cmd {
 	}
 }
 
+// refreshingStatus is the placeholder r shows until its reload lands.
+const refreshingStatus = "refreshing..."
+
 func (m model) beginLoad() (model, tea.Cmd) {
 	m.loadGen++
 	m.loading = true
@@ -205,7 +214,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.all = msg.entries
 			m.applyFilter()
-			m.status = fmt.Sprintf("%d listening sockets", len(m.all))
+			count := fmt.Sprintf("%d listening sockets", len(m.all))
+			if m.status == "" || m.status == refreshingStatus || m.status == m.countStatus {
+				m.status = count
+			}
+			m.countStatus = count
 		}
 		return m, nil
 
@@ -398,7 +411,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r", "ctrl+r":
 		m.err = nil
-		m.status = "refreshing..."
+		m.status = refreshingStatus
 		return m.beginLoad()
 	case "a":
 		m.auto = !m.auto
