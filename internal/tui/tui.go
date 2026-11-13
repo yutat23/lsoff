@@ -201,7 +201,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.filter.Width = max(10, msg.Width-4)
+		m.fitFilter()
 		m.clamp()
 		return m, nil
 
@@ -307,6 +307,22 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// fitFilter sizes the search input to the terminal width. textinput renders
+// the prompt, Width cells of the query and one more cell for the cursor (past
+// the end, or overlapping the scrolled window), so Width is what is left after
+// the prompt and that cell. A wrapped search line would shift every row below
+// it off the fixed mouse Y offsets. Terminals narrower than the prompt plus
+// two cells cannot fit the line at all.
+func (m *model) fitFilter() {
+	m.filter.Width = max(1, m.width-lipgloss.Width(m.filter.Prompt)-1)
+	// textinput recomputes its scroll window only when the cursor moves, so a
+	// query set before the first resize (or a shrink) would keep its old,
+	// wider window. Jumping to the end and back rebuilds it for the new Width.
+	pos := m.filter.Position()
+	m.filter.CursorEnd()
+	m.filter.SetCursor(pos)
 }
 
 func (m model) rowIndexAt(y int) (int, bool) {

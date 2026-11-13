@@ -163,6 +163,63 @@ func TestInitialQuery(t *testing.T) {
 	}
 }
 
+// TestSearchLineFitsWidth: the search input was sized without the prompt
+// and the cursor cell, and a query set before the first resize kept its
+// unscrolled window, so a long query rendered wider than the terminal and
+// the wrap shifted every line below it off the mouse Y offsets.
+func TestSearchLineFitsWidth(t *testing.T) {
+	queries := map[string]string{
+		"ascii": strings.Repeat("q", 80),
+		"wide":  strings.Repeat("日", 80),
+	}
+	key := func(mm tea.Model, msg tea.Msg) tea.Model {
+		next, _ := mm.Update(msg)
+		return next
+	}
+	right := tea.KeyMsg{Type: tea.KeyRight}
+	home := tea.KeyMsg{Type: tea.KeyHome}
+	states := []struct {
+		name string
+		set  func(mm tea.Model, w int) tea.Model
+	}{
+		{"focused at end", func(mm tea.Model, w int) tea.Model { return mm }},
+		{"focused at start", func(mm tea.Model, w int) tea.Model { return key(mm, home) }},
+		{"unfocused", func(mm tea.Model, w int) tea.Model { return key(mm, tea.KeyMsg{Type: tea.KeyEnter}) }},
+		// Scroll with the cursor mid-query, then shrink the terminal.
+		{"shrunk mid-query", func(mm tea.Model, w int) tea.Model {
+			mm = key(mm, home)
+			for i := 0; i < 40; i++ {
+				mm = key(mm, right)
+			}
+			return key(mm, tea.WindowSizeMsg{Width: w, Height: 24})
+		}},
+	}
+	for _, w := range []int{80, 40, 20} {
+		for qname, q := range queries {
+			for _, st := range states {
+				var mm tea.Model = newModel(false, false, false, q)
+				start := w
+				if st.name == "shrunk mid-query" {
+					start = 300
+				}
+				mm = key(mm, tea.WindowSizeMsg{Width: start, Height: 24})
+				mm = st.set(mm, w)
+				line := strings.Split(mm.View(), "\n")[viewFilterY]
+				if n := lipgloss.Width(line); n > w {
+					t.Fatalf("width %d, %s query, %s: search line is %d cells: %q", w, qname, st.name, n, listen.SanitizeDisplay(line))
+				}
+			}
+		}
+		// The placeholder shown for an empty query must fit as well.
+		var mm tea.Model = newModel(false, false, false, "")
+		mm = key(mm, tea.WindowSizeMsg{Width: w, Height: 24})
+		line := strings.Split(mm.View(), "\n")[viewFilterY]
+		if n := lipgloss.Width(line); n > w {
+			t.Fatalf("width %d: placeholder line is %d cells: %q", w, n, listen.SanitizeDisplay(line))
+		}
+	}
+}
+
 func TestViewSanitizesShortCwd(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 100

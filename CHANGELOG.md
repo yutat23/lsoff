@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linux: killing a process that had already exited between listing and the kill returned `no such process` instead of succeeding quietly as on macOS. A PID that now belongs to a different process is still refused.
 - TUI: `killed pid N` was replaced by the socket count as soon as the reload after the kill finished, so it was visible for only a moment. A finished reload no longer overwrites feedback about an action (`killed pid N`, `copied …`, `auto-refresh on`); the socket count still updates when it is what the status line shows.
 - TUI: with a full page of rows, the kill confirmation box made the view one line taller than the terminal, which pushed the title line off the top while it was open.
+- TUI: a long search query made the search line wider than the terminal (89 cells for an 80-character query in 80 columns), so it wrapped and shifted every row below it, including the rows that mouse clicks are mapped to.
 
 ## [0.1.5] - 2026-09-09
 
