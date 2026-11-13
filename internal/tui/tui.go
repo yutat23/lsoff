@@ -707,8 +707,8 @@ func (m model) View() string {
 		detail := max(8, m.width-6)
 		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
 		if e.Source == listen.SourceDocker {
-			b.WriteString(pathStyle.Render("SRC   docker\n"))
-			b.WriteString(pathStyle.Render("PORT  " + fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol) + "\n"))
+			b.WriteString(pathStyle.Render("SRC   docker") + "\n")
+			b.WriteString(pathStyle.Render("PORT  "+truncate(fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol), detail)) + "\n")
 			b.WriteString(pathStyle.Render("ID    "+dash(truncate(e.ContainerID, detail))) + "\n")
 		} else {
 			b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")

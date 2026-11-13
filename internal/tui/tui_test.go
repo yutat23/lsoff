@@ -569,6 +569,42 @@ func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
 	}
 }
 
+// TestDockerDetailLinesStartAtColumnZero: the SRC and PORT lines used to put
+// "\n" inside Render, so lipgloss padded the empty second line and the next
+// detail line (PORT, then ID) started after a run of spaces.
+func TestDockerDetailLinesStartAtColumnZero(t *testing.T) {
+	var mm tea.Model = newModel(false, false, false, "")
+	mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: []listen.Entry{{
+		Proto: listen.TCP, Port: 8080, Addr: "0.0.0.0", Name: "docker:web",
+		Source: listen.SourceDocker, ContainerID: "abcdef123456", ContainerPort: 80,
+		ContainerProtocol: "tcp",
+	}}})
+
+	// SanitizeDisplay also drops newlines, so split first and strip per line.
+	lines := strings.Split(mm.View(), "\n")
+	svc := -1
+	for i, line := range lines {
+		line = listen.SanitizeDisplay(line)
+		lines[i] = line
+		if strings.HasPrefix(line, "SVC   ") {
+			svc = i
+		}
+		if trimmed := strings.TrimLeft(line, " "); trimmed != line &&
+			(strings.HasPrefix(trimmed, "PORT  ") || strings.HasPrefix(trimmed, "ID    ")) {
+			t.Fatalf("line %d has leading padding before a detail label: %q", i, line)
+		}
+	}
+	if svc < 0 || svc+3 >= len(lines) {
+		t.Fatalf("SVC detail line missing or block truncated:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, want := range []string{"SRC   docker", "PORT  80/tcp", "ID    abcdef123456"} {
+		if got := strings.TrimRight(lines[svc+1+i], " "); got != want {
+			t.Fatalf("detail line %d = %q, want %q", svc+1+i, got, want)
+		}
+	}
+}
+
 func TestTogglePIDFilter(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 80
