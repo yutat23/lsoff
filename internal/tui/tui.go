@@ -737,7 +737,12 @@ func (m model) View() string {
 		}
 	}
 
-	b.WriteString("\n")
+	// The confirm box is three lines where the status line is one. A normal
+	// view is height-1 lines, so dropping this spacer while it is open makes
+	// the view exactly height lines without scrolling or shrinking the rows.
+	if !m.confirm {
+		b.WriteString("\n")
+	}
 	if e, ok := m.selected(); ok {
 		svc := listen.ServiceName(e.Proto, e.Port)
 		if svc == "" {

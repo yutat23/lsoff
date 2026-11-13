@@ -913,6 +913,106 @@ func TestViewFitsWidth(t *testing.T) {
 	}
 }
 
+// minViewHeight is the smallest terminal the fixed chrome (title, search,
+// header, detail block, status or confirm box, footer) fits in with one row.
+const minViewHeight = 13
+
+// TestViewFitsHeight: the kill confirmation box is three lines where the
+// status line is one, so with a full page of rows the view used to be one
+// line taller than the terminal and Bubble Tea dropped the title line.
+func TestViewFitsHeight(t *testing.T) {
+	entries := make([]listen.Entry, 60)
+	for i := range entries {
+		entries[i] = listen.Entry{Proto: listen.TCP, Port: uint16(1000 + i), Addr: "127.0.0.1", PID: 100 + i, Start: 1, Name: "listener"}
+	}
+	entries[59] = listen.Entry{
+		Proto: listen.TCP, Port: 1059, Addr: "0.0.0.0", Name: "docker:web",
+		Source: listen.SourceDocker, ContainerID: "abcdef012345", ContainerPort: 80, ContainerProtocol: "tcp",
+	}
+	key := func(mm tea.Model, k tea.KeyMsg) tea.Model {
+		next, _ := mm.Update(k)
+		return next
+	}
+	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	states := []struct {
+		name string
+		set  func(tea.Model) tea.Model
+	}{
+		{"normal", func(mm tea.Model) tea.Model { return mm }},
+		// Select the last row of the first page so the box must not hide it
+		// (stopping short of the Docker row, which x refuses).
+		{"confirming", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			for i := 1; i < min(m.pageSize(), len(m.rows)-1); i++ {
+				mm = key(mm, runes("j"))
+			}
+			return key(mm, runes("x"))
+		}},
+		{"confirming at end", func(mm tea.Model) tea.Model {
+			mm = key(mm, runes("G"))
+			mm = key(mm, runes("k"))
+			return key(mm, runes("x"))
+		}},
+		{"error", func(mm tea.Model) tea.Model {
+			m := mm.(model)
+			m.err = fmt.Errorf("permission denied")
+			return m
+		}},
+		{"docker selected", func(mm tea.Model) tea.Model { return key(mm, runes("G")) }},
+		{"empty", func(mm tea.Model) tea.Model {
+			mm = key(mm, runes("/"))
+			mm = key(mm, runes("zzz"))
+			return key(mm, tea.KeyMsg{Type: tea.KeyEnter})
+		}},
+		{"searching", func(mm tea.Model) tea.Model {
+			mm = key(mm, runes("/"))
+			return key(mm, runes("listener"))
+		}},
+	}
+	for _, h := range []int{minViewHeight, minViewHeight + 1, 16, 20, 24, 30, 40, 50, 80} {
+		for _, st := range states {
+			var mm tea.Model = newModel(false, false, false, "")
+			mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: h})
+			mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: entries})
+			mm = st.set(mm)
+			m := mm.(model)
+			if st.name == "confirming" || st.name == "confirming at end" {
+				if !m.confirm {
+					t.Fatalf("h=%d %s: precondition: confirmation not open", h, st.name)
+				}
+			}
+
+			lines := strings.Split(m.View(), "\n")
+			for i := range lines {
+				lines[i] = listen.SanitizeDisplay(lines[i])
+			}
+			if len(lines) > h {
+				t.Fatalf("h=%d %s: view is %d lines, want <= %d:\n%s", h, st.name, len(lines), h, strings.Join(lines, "\n"))
+			}
+			if !strings.HasPrefix(lines[0], "lsoff") {
+				t.Fatalf("h=%d %s: title is not the first line: %q", h, st.name, lines[0])
+			}
+			// The rows View draws must be exactly the rows rowIndexAt maps
+			// clicks to, and the selected row must be among them.
+			drawn := min(m.pageSize(), len(m.rows)-m.offset)
+			for k := 0; k < drawn; k++ {
+				y := viewRowsY + k
+				i, ok := m.rowIndexAt(y)
+				want := fmt.Sprintf("  %5d  ", m.rows[m.offset+k].e.Port)
+				if !ok || i != m.offset+k || !strings.Contains(lines[y], want) {
+					t.Fatalf("h=%d %s: line %d = %q, rowIndexAt=(%d, %v), want row %d (port%s)", h, st.name, y, lines[y], i, ok, m.offset+k, want)
+				}
+			}
+			if _, ok := m.rowIndexAt(viewRowsY + drawn); ok {
+				t.Fatalf("h=%d %s: rowIndexAt hits line %d below the drawn rows", h, st.name, viewRowsY+drawn)
+			}
+			if len(m.rows) > 0 && (m.cursor < m.offset || m.cursor >= m.offset+drawn) {
+				t.Fatalf("h=%d %s: cursor %d not among drawn rows [%d, %d)", h, st.name, m.cursor, m.offset, m.offset+drawn)
+			}
+		}
+	}
+}
+
 // TestRowsAlignWithHeaderWide is TestRowsAlignWithHeader with full-width text:
 // CJK characters take two cells, so padding by rune count shifts every column
 // after PROJECT.
