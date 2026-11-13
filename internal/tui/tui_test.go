@@ -1014,6 +1014,54 @@ func TestDockerDetailLinesStartAtColumnZero(t *testing.T) {
 	}
 }
 
+// TestDockerDetailSanitized: the PORT and ID detail lines rendered the
+// container protocol and ID as Docker reported them, so an escape sequence
+// in either reached the terminal and a newline split the detail block.
+func TestDockerDetailSanitized(t *testing.T) {
+	render := func(id, proto string) string {
+		var mm tea.Model = newModel(false, false, false, "")
+		mm, _ = mm.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+		mm, _ = mm.Update(loadedMsg{gen: mm.(model).loadGen, entries: []listen.Entry{{
+			Proto: listen.TCP, Port: 8080, Addr: "0.0.0.0", Name: "docker:web",
+			Source: listen.SourceDocker, ContainerID: id, ContainerPort: 80,
+			ContainerProtocol: proto,
+		}}})
+		return mm.View()
+	}
+	// SGR color, an OSC window title ended by BEL and by ST, and a raw newline.
+	view := render("\x1b[31mabc\x1b[0m\x1b]0;pwned-id\x07\nxyz", "t\x1b[31mc\x1b]2;pwned-proto\x1b\\p\nx")
+
+	// Assert on the raw view: stripping it with SanitizeDisplay would also
+	// strip the injected bytes and hide the bug.
+	for _, bad := range []string{"\x1b[31m", "\x1b]", "\x07", "\x1b\\", "pwned"} {
+		if strings.Contains(view, bad) {
+			t.Fatalf("injected %q reached the view: %q", bad, view)
+		}
+	}
+	// SanitizeDisplay turns the newline into a space, so the hostile values
+	// must render exactly like these clean ones, byte for byte.
+	if clean := render("abc xyz", "tcp x"); view != clean {
+		t.Fatalf("view differs from the one for the sanitized values\ngot:  %q\nwant: %q", view, clean)
+	}
+
+	lines := strings.Split(view, "\n")
+	svc := -1
+	for i := range lines {
+		lines[i] = listen.SanitizeDisplay(lines[i])
+		if strings.HasPrefix(lines[i], "SVC   ") {
+			svc = i
+		}
+	}
+	if svc < 0 || svc+4 >= len(lines) {
+		t.Fatalf("SVC detail line missing or block truncated:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, want := range []string{"SRC   docker", "PORT  80/tcp x", "ID    abc xyz", "1 listening sockets"} {
+		if got := strings.TrimRight(lines[svc+1+i], " "); got != want {
+			t.Fatalf("line %d after SVC = %q, want %q", 1+i, got, want)
+		}
+	}
+}
+
 func TestTogglePIDFilter(t *testing.T) {
 	m := newModel(false, false, false, "")
 	m.width = 80

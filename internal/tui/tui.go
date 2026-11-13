@@ -790,9 +790,12 @@ func (m model) View() string {
 		detail := max(8, m.width-6)
 		b.WriteString(pathStyle.Render("SVC   "+dash(truncate(svc, detail))) + "\n")
 		if e.Source == listen.SourceDocker {
+			// The container fields come from the Docker Engine API. Sanitize
+			// them here like the process fields rather than relying on
+			// internal/docker's validation to keep escapes off the terminal.
 			b.WriteString(pathStyle.Render("SRC   docker") + "\n")
-			b.WriteString(pathStyle.Render("PORT  "+truncate(fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol), detail)) + "\n")
-			b.WriteString(pathStyle.Render("ID    "+dash(truncate(e.ContainerID, detail))) + "\n")
+			b.WriteString(pathStyle.Render("PORT  "+truncate(listen.SanitizeDisplay(fmt.Sprintf("%d/%s", e.ContainerPort, e.ContainerProtocol)), detail)) + "\n")
+			b.WriteString(pathStyle.Render("ID    "+dash(truncate(listen.SanitizeDisplay(e.ContainerID), detail))) + "\n")
 		} else {
 			b.WriteString(pathStyle.Render("PATH  "+dash(truncate(listen.SanitizeDisplay(e.Path), detail))) + "\n")
 			b.WriteString(pathStyle.Render("CMD   "+dash(truncate(listen.SanitizeDisplay(e.Cmdline), detail))) + "\n")
