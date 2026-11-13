@@ -678,8 +678,30 @@ func TestDockerEntryIsRenderableAndNotKillable(t *testing.T) {
 		t.Fatalf("Docker entry did not render: %q", m.View())
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	if next.(model).confirm {
+	got := next.(model)
+	if got.confirm {
 		t.Fatal("Docker entry opened process kill confirmation")
+	}
+	// Root cannot give a container a PID, so the hint must point at docker.
+	if want := "Docker container: lsoff cannot stop it (docker stop web)"; got.status != want {
+		t.Fatalf("status=%q, want %q", got.status, want)
+	}
+}
+
+// TestXOnUnknownPIDSuggestsRoot: a host process whose PID could not be read
+// usually needs more privileges, unlike a Docker row.
+func TestXOnUnknownPIDSuggestsRoot(t *testing.T) {
+	m := newModel(false, false, false, "")
+	m.width = 80
+	m.height = 24
+	m.loading = false
+	m.rows = []viewRow{
+		{e: listen.Entry{Proto: listen.TCP, Port: 22, Addr: "0.0.0.0"}},
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	got := next.(model)
+	if got.confirm || got.status != "pid unknown (try as root)" {
+		t.Fatalf("confirm=%v status=%q", got.confirm, got.status)
 	}
 }
 

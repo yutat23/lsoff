@@ -113,7 +113,7 @@ func runKill(cfg config, entries []listen.Entry, in io.Reader, out, errw io.Writ
 	}
 	ids := listen.UniqueIdents(entries)
 	if len(ids) == 0 {
-		return &exitError{code: 1, msg: "no process ids to kill (try as root)"}
+		return &exitError{code: 1, msg: noPIDsToKill(entries)}
 	}
 	pids := make([]int, len(ids))
 	for i, id := range ids {
@@ -143,6 +143,39 @@ func runKill(cfg config, entries []listen.Entry, in io.Reader, out, errw io.Writ
 		return &exitError{code: 1}
 	}
 	return nil
+}
+
+// noPIDsToKill explains why entries have nothing to kill. Docker rows never
+// have a PID, so for them "try as root" is the wrong hint: name the
+// containers and point at docker stop instead.
+func noPIDsToKill(entries []listen.Entry) string {
+	var names []string
+	seen := make(map[string]bool)
+	unknown := false
+	for _, e := range entries {
+		if e.Source != listen.SourceDocker {
+			unknown = true
+			continue
+		}
+		name := listen.SanitizeDisplay(listen.ContainerName(e))
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return "no process ids to kill (try as root)"
+	}
+	label := "container"
+	if len(names) != 1 {
+		label = "containers"
+	}
+	msg := fmt.Sprintf("no process ids to kill: published by Docker %s %s; lsoff cannot stop containers (use docker stop %s)",
+		label, strings.Join(names, ", "), strings.Join(names, " "))
+	if unknown {
+		msg += "; other listeners have an unknown pid (try as root)"
+	}
+	return msg
 }
 
 func confirmKill(in io.Reader, errw io.Writer, pids []int) (bool, error) {

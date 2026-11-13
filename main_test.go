@@ -374,3 +374,86 @@ func TestRunKillConfirmation(t *testing.T) {
 		t.Fatalf("%s", errw.String())
 	}
 }
+
+func dockerEntry(port uint16, addr, name string) listen.Entry {
+	return listen.Entry{
+		Proto: listen.TCP, Port: port, Addr: addr, Name: "docker:" + name,
+		Source: listen.SourceDocker, ContainerID: name + "-id",
+	}
+}
+
+// Docker rows have no PID by design, so "try as root" would send the user the
+// wrong way: the message must name the container and docker stop instead.
+func TestRunKillDockerOnlyPointsAtDockerStop(t *testing.T) {
+	stubKill(t, func(id listen.Ident) error {
+		t.Fatalf("killed %+v for a Docker-only port", id)
+		return nil
+	})
+	cases := []struct {
+		name    string
+		entries []listen.Entry
+		want    string
+	}{
+		{
+			"one container on v4 and v6",
+			[]listen.Entry{dockerEntry(8080, "0.0.0.0", "web"), dockerEntry(8080, "::", "web")},
+			"no process ids to kill: published by Docker container web; lsoff cannot stop containers (use docker stop web)",
+		},
+		{
+			"two containers, escape sanitized",
+			[]listen.Entry{dockerEntry(8080, "0.0.0.0", "web"), dockerEntry(8080, "127.0.0.1", "d\x1b[31mb")},
+			"no process ids to kill: published by Docker containers web, db; lsoff cannot stop containers (use docker stop web db)",
+		},
+		{
+			"container beside an unknown pid",
+			[]listen.Entry{dockerEntry(8080, "0.0.0.0", "web"), {Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1"}},
+			"no process ids to kill: published by Docker container web; lsoff cannot stop containers (use docker stop web); other listeners have an unknown pid (try as root)",
+		},
+	}
+	for _, c := range cases {
+		stubEntries(t, c.entries)
+		var out, errw bytes.Buffer
+		err := run([]string{"-k", "-y", "8080"}, strings.NewReader(""), &out, &errw)
+		var ee *exitError
+		if !errors.As(err, &ee) || ee.code != 1 {
+			t.Fatalf("%s: err=%v, want exit 1", c.name, err)
+		}
+		if ee.msg != c.want {
+			t.Fatalf("%s:\ngot  %q\nwant %q", c.name, ee.msg, c.want)
+		}
+	}
+}
+
+func TestRunKillUnknownPIDSuggestsRoot(t *testing.T) {
+	stubEntries(t, []listen.Entry{{Proto: listen.TCP, Port: 2222, Addr: "0.0.0.0"}})
+	var out, errw bytes.Buffer
+	err := run([]string{"-k", "-y", "2222"}, strings.NewReader(""), &out, &errw)
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != 1 || ee.msg != "no process ids to kill (try as root)" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// A Docker row on the same port must not get in the way of killing a real
+// process there.
+func TestRunKillRealProcessBesideDocker(t *testing.T) {
+	stubEntries(t, []listen.Entry{
+		dockerEntry(8080, "0.0.0.0", "web"),
+		{Proto: listen.TCP, Port: 8080, Addr: "127.0.0.1", PID: 11, Start: 1, Name: "node"},
+	})
+	var killed []int
+	stubKill(t, func(id listen.Ident) error {
+		killed = append(killed, id.PID)
+		return nil
+	})
+	var out, errw bytes.Buffer
+	if err := run([]string{"-k", "-y", "8080"}, strings.NewReader(""), &out, &errw); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(killed) != 1 || killed[0] != 11 {
+		t.Fatalf("killed=%v", killed)
+	}
+	if errw.String() != "killed pid 11\n" {
+		t.Fatalf("%q", errw.String())
+	}
+}

@@ -458,6 +458,12 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "nothing selected"
 			return m, nil
 		}
+		// A Docker row never has a PID, so root would not help; point at the
+		// tool that can stop it instead.
+		if e.Source == listen.SourceDocker {
+			m.status = "Docker container: lsoff cannot stop it (docker stop " + listen.SanitizeDisplay(listen.ContainerName(e)) + ")"
+			return m, nil
+		}
 		if e.PID <= 0 {
 			m.status = "pid unknown (try as root)"
 			return m, nil

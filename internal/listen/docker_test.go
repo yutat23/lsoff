@@ -37,6 +37,12 @@ func TestListWithDockerMergesOnlyDockerProxy(t *testing.T) {
 	if dockerEntry.PID != 0 || dockerEntry.Name != "docker:web" || dockerEntry.ContainerID != "abcdef012345" {
 		t.Fatalf("bad Docker entry: %#v", dockerEntry)
 	}
+	if got := ContainerName(dockerEntry); got != "web" {
+		t.Fatalf("ContainerName=%q, want web", got)
+	}
+	if got := ContainerName(Entry{Source: SourceDocker, ContainerID: "abcdef012345"}); got != "abcdef012345" {
+		t.Fatalf("ContainerName without a name=%q, want the container ID", got)
+	}
 }
 
 func TestListWithDockerReplacesAnonymousWildcardMappings(t *testing.T) {
