@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- macOS: an IPv6 wildcard listener that also accepts IPv4 (a dual-stack socket, such as `rapportd`) was shown with the address `0.0.0.0` instead of `::`. The TUI `6` filter hid it and `y` copied the wrong address. It is now shown as `::`, as `lsof` and Linux report it.
 - TUI: a list reload that finished while the kill confirmation was open could move the selection to another row, and `y` then killed that process instead of the one named when `x` was pressed. The confirmation now keeps the process it was opened for.
 - TUI: the `PORT` and `ID` detail lines of a Docker row were indented by 12 spaces instead of starting at the left edge like `SVC` and `SRC`.
 
