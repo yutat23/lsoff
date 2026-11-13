@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Docker: Engine のソケットを `/var/run/docker.sock` 固定で探すのをやめた。`DOCKER_HOST` が `unix://` のソケットならそれだけを使い、未設定なら `/var/run/docker.sock`、`$XDG_RUNTIME_DIR/docker.sock`（rootless Docker）、`~/.docker/run/docker.sock`（Docker Desktop）の順に、合計 750 ms の範囲で試す。`DOCKER_HOST` がそれ以外（`tcp://`、`ssh://` など）の場合は、リモートの Engine の公開ポートはこのホストのリスナーではないため、Docker の情報は取得しない。
+
 ### Fixed
 
 - macOS: IPv4 も受け付ける IPv6 ワイルドカードのリスナー（`rapportd` などのデュアルスタックのソケット）が、`::` ではなく `0.0.0.0` と表示されていた。TUI の `6` フィルターで消え、`y` でコピーされるアドレスも違っていた。`lsof` や Linux と同じく `::` と表示するようにした。

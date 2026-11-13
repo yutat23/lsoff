@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Docker: the Engine socket is no longer fixed to `/var/run/docker.sock`. A `unix://` `DOCKER_HOST` is used on its own; otherwise `/var/run/docker.sock`, `$XDG_RUNTIME_DIR/docker.sock` (rootless Docker) and `~/.docker/run/docker.sock` (Docker Desktop) are tried in order within one 750 ms budget. Any other `DOCKER_HOST` (`tcp://`, `ssh://`, …) disables Docker discovery, since a remote engine's ports are not listeners on this host.
+
 ### Fixed
 
 - macOS: an IPv6 wildcard listener that also accepts IPv4 (a dual-stack socket, such as `rapportd`) was shown with the address `0.0.0.0` instead of `::`. The TUI `6` filter hid it and `y` copied the wrong address. It is now shown as `::`, as `lsof` and Linux report it.

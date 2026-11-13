@@ -119,7 +119,7 @@ CLI の `-k` も同じです。同じ PID が IPv4/IPv6 で二重に出ていて
 
 権限のないプロセスは PID やパス、cmdline が空になることがあります。その場合は root / Administrator で実行してください。
 
-Docker の公開ポートにも対応しています。`/var/run/docker.sock` 経由でローカルの Docker Engine API から公開ポート情報を取得し、OS から取得した一覧に追加します。実行ユーザーには、このソケットへのアクセス権が必要です。Docker がない場合や、ソケットに接続できない場合、API が失敗した場合も、通常のプロセス一覧は表示します。公開ポート情報は、コンテナがホスト側のソケットを所有していることを示すものではありません。
+Docker の公開ポートにも対応しています。Unix ソケット経由でローカルの Docker Engine API から公開ポート情報を取得し、OS から取得した一覧に追加します。`DOCKER_HOST` が `unix://` のソケットを指している場合は、そのソケットだけを使います。それ以外の場合は `/var/run/docker.sock`、`$XDG_RUNTIME_DIR/docker.sock`（rootless Docker）、`~/.docker/run/docker.sock`（Docker Desktop）の順に試し、最初に応答したものを使います。`DOCKER_HOST` がそれ以外の値（`tcp://`、`ssh://`、`npipe://` など）の場合は、リモートの Engine の公開ポートはこのホストのリスナーではないため、Docker の情報は取得しません。Colima、OrbStack、Rancher Desktop、Podman などのランタイムは、`DOCKER_HOST` にその `unix://` ソケットを指定すれば使えます。実行ユーザーには、ソケットへのアクセス権が必要です。Docker がない場合や、使えるソケットがない場合、API が失敗した場合も、通常のプロセス一覧は表示します。公開ポート情報は、コンテナがホスト側のソケットを所有していることを示すものではありません。
 
 Docker の行は `PROCESS` に `docker:grafana` のようなコンテナ名を表示し、TUI の詳細欄にはコンテナ側のポートとプロトコル、コンテナ ID を表示します。PID を持たないため、`p` / `-p` で非表示になり、`x` / `-k` でコンテナを停止することはできません。
 

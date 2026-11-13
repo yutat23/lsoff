@@ -122,10 +122,17 @@ No external commands (`lsof` / `ss` / `netstat`).
 Without permission, PID, path, and cmdline may be empty. Run as root / Administrator in that case.
 
 Docker-published ports are supported as well. lsoff supplements kernel socket
-discovery with published-port metadata from the local Docker Engine API over
-`/var/run/docker.sock`; it does not imply that the container owns a host
-namespace socket. The current user must have permission to access that socket.
-If Docker is absent, the socket is unavailable, or access/API calls fail,
+discovery with published-port metadata from the local Docker Engine API over a
+Unix socket; it does not imply that the container owns a host namespace
+socket. If `DOCKER_HOST` is a `unix://` socket, only that socket is used.
+Otherwise lsoff tries `/var/run/docker.sock`, `$XDG_RUNTIME_DIR/docker.sock`
+(rootless Docker) and `~/.docker/run/docker.sock` (Docker Desktop) in that
+order and uses the first one that answers. Any other `DOCKER_HOST` value
+(`tcp://`, `ssh://`, `npipe://`, …) disables Docker discovery, because a
+remote engine's ports are not listeners on this host. Other runtimes (Colima,
+OrbStack, Rancher Desktop, Podman) work by pointing `DOCKER_HOST` at their
+`unix://` socket. The current user must have permission to access the socket.
+If Docker is absent, no socket is available, or access/API calls fail,
 normal host-process discovery continues unchanged.
 
 Docker rows show a container name such as `docker:grafana` in `PROCESS`. The TUI details show the container-side port and protocol, and the container ID. These rows have no PID, so `p` / `-p` hides them, and `x` / `-k` cannot stop containers.
