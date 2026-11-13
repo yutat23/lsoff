@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-13
+
 ### Changed
 
 - Docker: Engine のソケットを `/var/run/docker.sock` 固定で探すのをやめた。`DOCKER_HOST` が `unix://` のソケットならそれだけを使い、未設定なら `/var/run/docker.sock`、`$XDG_RUNTIME_DIR/docker.sock`（rootless Docker）、`~/.docker/run/docker.sock`（Docker Desktop）の順に、合計 750 ms の範囲で試す。`DOCKER_HOST` がそれ以外（`tcp://`、`ssh://` など）の場合は、リモートの Engine の公開ポートはこのホストのリスナーではないため、Docker の情報は取得しない。
@@ -92,7 +94,8 @@
 
 - 初回リリース。Windows / Linux / macOS で LISTEN 中の TCP/UDP ポートを一覧し、TUI と任意の kill を提供する。
 
-[Unreleased]: https://github.com/yutat23/lsoff/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/yutat23/lsoff/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/yutat23/lsoff/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/yutat23/lsoff/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/yutat23/lsoff/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/yutat23/lsoff/compare/v0.1.2...v0.1.3

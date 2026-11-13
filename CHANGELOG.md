@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-13
+
 ### Changed
 
 - Docker: the Engine socket is no longer fixed to `/var/run/docker.sock`. A `unix://` `DOCKER_HOST` is used on its own; otherwise `/var/run/docker.sock`, `$XDG_RUNTIME_DIR/docker.sock` (rootless Docker) and `~/.docker/run/docker.sock` (Docker Desktop) are tried in order within one 750 ms budget. Any other `DOCKER_HOST` (`tcp://`, `ssh://`, …) disables Docker discovery, since a remote engine's ports are not listeners on this host.
@@ -93,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release: list listening TCP/UDP ports on Windows, Linux, and macOS, with an interactive TUI and optional kill.
 
-[Unreleased]: https://github.com/yutat23/lsoff/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/yutat23/lsoff/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/yutat23/lsoff/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/yutat23/lsoff/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/yutat23/lsoff/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/yutat23/lsoff/compare/v0.1.2...v0.1.3
